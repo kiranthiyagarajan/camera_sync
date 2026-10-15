@@ -9,6 +9,15 @@ Run everything from the project folder: `cd ~/camera_sync`
   capturing (it takes bandwidth from the camera).
 - Keep cameras ventilated: at 120 fps they lose frames once they heat up.
 
+## Frame rate
+120 fps (default) or 60 fps. 60 fps halves the CPU load and the cameras run cooler;
+for a slow robot it is plenty. Set it for every tool:
+```
+python3 -m camsync.config --fps 60      # or --fps 120; prints the current rig.json
+```
+Each tool also takes `--fps 60` to override it for one run. The longest exposure is
+8.3 ms at 120 fps and 16.5 ms at 60 fps.
+
 ## 2. Name the cameras (once, or after re-plugging into different ports)
 ```
 python3 -m camsync.assign

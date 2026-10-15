@@ -16,13 +16,16 @@ def main():
     p = argparse.ArgumentParser(description="Capture all cameras and report sync quality.")
     p.add_argument("--seconds", type=float, default=10)
     p.add_argument("--size", help="1280x720, 800x600 or 640x480 (default: rig.json)")
-    p.add_argument("--exposure", type=int, help="100 µs units (max 83 for 120 fps)")
+    p.add_argument("--exposure", type=int, help="100 µs units (max 83 at 120 fps, 165 at 60 fps)")
     p.add_argument("--gain", type=int)
+    p.add_argument("--fps", type=int, choices=config.FPS_CHOICES, help="override rig.json frame rate")
     p.add_argument("--decode", type=int, nargs="?", const=1, metavar="REDUCE",
                    help="also decode every frame to grayscale (optionally at 1/2, 1/4, 1/8 size)")
     args = p.parse_args()
 
     cfg = config.load()
+    if args.fps:
+        config.set_fps(cfg, args.fps)
     if args.size:
         cfg["format"]["width"], cfg["format"]["height"] = map(int, args.size.split("x"))
 

@@ -11,13 +11,11 @@ import time
 from . import config
 from .rig import Rig
 
-MIN_FPS = 118.0
-
-
 def main():
     p = argparse.ArgumentParser(description="Check the camera rig before a session.")
     p.add_argument("--config", default=config.DEFAULT_PATH)
     p.add_argument("--seconds", type=float, default=30, help="streaming test length")
+    p.add_argument("--fps", type=int, choices=config.FPS_CHOICES, help="override rig.json frame rate")
     args = p.parse_args()
     levels = []
 
@@ -31,6 +29,10 @@ def main():
     else:
         report("WARN", "no rig.json: cameras are unnamed (run: python3 -m camsync.assign)")
     cfg = config.load(args.config)
+    if args.fps:
+        config.set_fps(cfg, args.fps)
+    fmt = cfg["format"]
+    min_fps = config.min_fps(fmt["fps"])
 
     print("== cameras")
     cams, missing, unassigned = config.resolve(cfg)
@@ -65,7 +67,7 @@ def main():
             report("PASS", f"{cid}: all settings applied (exposure "
                            f"{ctl['exposure_time_absolute'] / 10:.1f} ms, gain {ctl['gain']})")
 
-    print(f"== streaming test ({args.seconds:.0f} s, 1280x720 at 120 fps)")
+    print(f"== streaming test ({args.seconds:.0f} s, {fmt['width']}x{fmt['height']} at {fmt['fps']} fps)")
     sets = complete = 0
     max_offset = 0.0
     with rig:
@@ -92,9 +94,9 @@ def main():
         st = rig.stats[cid]
         fps = st.total_frames / elapsed
         msg = f"{cid}: {fps:.1f} fps, lost {st.total_lost} frames ({st.total_loss:.2%})"
-        if st.total_lost == 0 and fps >= MIN_FPS:
+        if st.total_lost == 0 and fps >= min_fps:
             report("PASS", msg)
-        elif st.total_loss < 0.001 and fps >= MIN_FPS:
+        elif st.total_loss < 0.001 and fps >= min_fps:
             report("WARN", msg)
         else:
             report("FAIL", msg + " - check cooling, cable and port")

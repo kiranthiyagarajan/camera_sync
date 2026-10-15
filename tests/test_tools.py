@@ -92,6 +92,11 @@ class AutoExposureTest(unittest.TestCase):
         self.assertFalse(ae.ok)
         self.assertIn("too dark", ae.message)
 
+    def test_exposure_cap_follows_frame_rate(self):
+        self.assertEqual(AutoExposure("board", 50, 0, fps=120).p["max_exposure"], 83)
+        self.assertEqual(AutoExposure("board", 50, 0, fps=60).p["max_exposure"], 165)
+        self.assertEqual(AutoExposure("marker", 50, 0, fps=60).p["max_exposure"], 20)  # blur cap
+
     def test_board_mode(self):
         ae = run_auto("board", marker_rate=2.0, background_rate=0.6, exposure=10, board=True)
         self.assertTrue(ae.ok, ae.message)

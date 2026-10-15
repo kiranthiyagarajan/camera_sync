@@ -45,7 +45,7 @@ class Rig:
         except Exception:
             self.close()
             raise
-        self.width, self.height = fmt["width"], fmt["height"]
+        self.width, self.height, self.fps = fmt["width"], fmt["height"], fmt["fps"]
         self.sync = Synchronizer(self.ids, self.clocks[self.ids[0]].period)
         self.latest = {}  # cam -> newest Frame
         self.corrupt = {c: 0 for c in self.ids}

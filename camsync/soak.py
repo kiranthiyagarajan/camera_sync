@@ -17,14 +17,17 @@ def main():
     p.add_argument("--config", default=config.DEFAULT_PATH)
     p.add_argument("--minutes", type=float, default=10)
     p.add_argument("--every", type=float, default=10, help="seconds between status lines")
+    p.add_argument("--fps", type=int, choices=config.FPS_CHOICES, help="override rig.json frame rate")
     args = p.parse_args()
 
     cfg = config.load(args.config)
+    if args.fps:
+        config.set_fps(cfg, args.fps)
     rig = Rig(cfg, queue=1024)  # keep every set; it is counted, not displayed
     logger = CsvLogger("soak")
     last_set, max_offset = None, 0.0
     print(f"soak test: {len(rig.ids)} cameras ({', '.join(f'{c}=port {rig.ports[c]}' for c in rig.ids)}), "
-          f"{args.minutes:g} min, log {logger.path}")
+          f"{rig.fps} fps, {args.minutes:g} min, log {logger.path}")
     with rig:
         # Count from the moment every clock has locked, so startup doesn't skew the numbers.
         deadline = time.monotonic() + 5

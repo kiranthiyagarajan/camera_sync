@@ -2,7 +2,7 @@
 import cv2
 import numpy as np
 
-from .config import MAX_EXPOSURE
+from .config import max_exposure
 
 SATURATED = 250  # pixel value treated as clipped
 
@@ -75,13 +75,15 @@ class AutoExposure:
 
     MODES = {
         "marker": dict(metric="peak", target=235, low=215, high=250, max_exposure=20),
-        "board": dict(metric="p995", target=200, low=180, high=220, max_exposure=MAX_EXPOSURE),
+        "board": dict(metric="p995", target=200, low=180, high=220, max_exposure=None),
     }
     GAIN_STEP = 8
 
-    def __init__(self, mode, exposure, gain, max_gain=63, max_iter=15):
+    def __init__(self, mode, exposure, gain, fps=120, max_gain=63, max_iter=15):
         self.mode = mode
-        self.p = self.MODES[mode]
+        self.p = dict(self.MODES[mode])
+        frame_cap = max_exposure(fps)  # exposure can't exceed one frame
+        self.p["max_exposure"] = min(self.p["max_exposure"] or frame_cap, frame_cap)
         self.exposure = int(exposure)
         self.gain = int(gain)
         self.max_gain = max_gain

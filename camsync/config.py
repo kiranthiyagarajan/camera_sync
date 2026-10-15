@@ -17,7 +17,7 @@ CAPTURE_DIR = os.path.join(PROJECT_DIR, "captures")
 # exposure time can be set).
 BASE_CONTROLS = {
     "auto_exposure": 1,              # manual; auto exposure can lower the frame rate
-    "exposure_time_absolute": 50,    # 100 µs units -> 5 ms; <= 83 to sustain 120 fps
+    "exposure_time_absolute": 50,    # 100 µs units -> 5 ms; must fit in a frame (max_exposure)
     "gain": 0,
     "power_line_frequency": 0,       # anti-flicker off so it can't alter frame timing
     "backlight_compensation": 0,
@@ -29,8 +29,18 @@ BASE_CONTROLS = {
     "saturation": 0,
 }
 
-# exposure_time_absolute units are 100 µs; one frame at 118.5 fps is 8.4 ms.
-MAX_EXPOSURE = 83
+FPS_CHOICES = (120, 60)
+
+
+def max_exposure(fps):
+    """Longest exposure (100 µs units) that still fits in one frame at this frame rate:
+    8.3 ms at 120 fps (measured period 8.44 ms), 16.5 ms at 60 fps (measured 16.64 ms)."""
+    return {120: 83, 60: 165}[fps]
+
+
+def min_fps(fps):
+    """Lowest acceptable measured frame rate (the cameras run ~1.2% under nominal)."""
+    return fps * 0.98
 
 
 def default_config():
@@ -58,6 +68,12 @@ def save(cfg, path=DEFAULT_PATH):
         json.dump(cfg, f, indent=2, sort_keys=True)
         f.write("\n")
     os.replace(tmp, path)
+
+
+def set_fps(cfg, fps):
+    if fps not in FPS_CHOICES:
+        raise ValueError(f"fps must be one of {FPS_CHOICES}")
+    cfg["format"]["fps"] = fps
 
 
 def controls_for(cfg, cam):
@@ -89,3 +105,21 @@ def resolve(cfg, infos=None):
     missing = sorted(n for n in cfg["cameras"] if n not in found)
     return (sorted(named, key=lambda i: i.id) + sorted(unassigned, key=lambda i: i.port),
             missing, unassigned)
+
+
+def main():
+    import argparse
+    p = argparse.ArgumentParser(description="Show or change rig.json settings.")
+    p.add_argument("--config", default=DEFAULT_PATH)
+    p.add_argument("--fps", type=int, choices=FPS_CHOICES, help="set the frame rate for all tools")
+    args = p.parse_args()
+    cfg = load(args.config)
+    if args.fps:
+        set_fps(cfg, args.fps)
+        save(cfg, args.config)
+        print(f"frame rate set to {args.fps} fps in {args.config}")
+    print(json.dumps(cfg, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

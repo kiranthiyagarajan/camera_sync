@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 
 from . import config
-from .config import CAPTURE_DIR, MAX_EXPOSURE
+from .config import CAPTURE_DIR, max_exposure
 from .imaging import (AutoExposure, decode, downscale2, focus_score, histogram_image,
                       saturation_mask2)
 from .rig import Rig
@@ -83,9 +83,10 @@ class RigView:
                 new = min(63, cur + 4) if up else max(0, cur - 4)
             else:
                 new = max(cur + 1, round(cur * 1.25)) if up else min(cur - 1, round(cur * 0.8))
-                if new > MAX_EXPOSURE:
-                    self.say(f"exposure is capped at {MAX_EXPOSURE / 10} ms to keep 120 fps")
-                new = max(1, min(MAX_EXPOSURE, new))
+                cap = max_exposure(self.rig.fps)
+                if new > cap:
+                    self.say(f"exposure is capped at {cap / 10} ms to keep {self.rig.fps} fps")
+                new = max(1, min(cap, new))
             self.rig.set_control(cid, name, new)
         cid = self.selected()[0]
         ctl = self.rig.current[cid]
@@ -95,7 +96,8 @@ class RigView:
     def start_auto(self, mode):
         for cid in self.selected():
             ctl = self.rig.current[cid]
-            self.auto[cid] = [AutoExposure(mode, ctl["exposure_time_absolute"], ctl["gain"]), 0.0]
+            self.auto[cid] = [AutoExposure(mode, ctl["exposure_time_absolute"], ctl["gain"],
+                                           fps=self.rig.fps), 0.0]
         hint = ("keep markers in view of every camera" if mode == "marker"
                 else "hold the calibration board in view")
         self.say(f"auto exposure ({mode}) started: {hint}", 6)
@@ -355,12 +357,15 @@ class RigView:
 def main():
     p = argparse.ArgumentParser(description="Live dashboard for the camera rig.")
     p.add_argument("--config", default=config.DEFAULT_PATH)
+    p.add_argument("--fps", type=int, choices=config.FPS_CHOICES, help="override rig.json frame rate")
     p.add_argument("--duration", type=float, help="quit after this many seconds")
     p.add_argument("--snapshot", help="with --duration: save the final dashboard image to this file")
     p.add_argument("--keys", default="", help=argparse.SUPPRESS)  # scripted key presses for testing
     args = p.parse_args()
 
     cfg = config.load(args.config)
+    if args.fps:
+        config.set_fps(cfg, args.fps)
     cams, missing, _ = config.resolve(cfg)
     for name in missing:
         print(f"WARNING: {name} (port {cfg['cameras'][name]}) is not connected")
