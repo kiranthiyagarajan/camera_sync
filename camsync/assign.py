@@ -16,7 +16,7 @@ import numpy as np
 from . import config
 from .imaging import CoverDetector, decode
 from .rig import Rig
-from .rigview import COLORS, text
+from .plots import COLORS, text
 
 WINDOW = "assign cameras"
 

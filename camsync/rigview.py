@@ -19,11 +19,11 @@ from . import config
 from .config import CAPTURE_DIR, max_exposure
 from .imaging import (AutoExposure, decode, downscale2, focus_score, histogram_image,
                       saturation_mask2)
+from .plots import COLORS, stats_graphs, text
 from .rig import Rig
 from .stats import CsvLogger
 
 WINDOW = "rigview"
-COLORS = [(80, 200, 255), (255, 170, 60), (110, 220, 110), (210, 120, 255)]  # BGR per camera
 GRAPH_H, HELP_H = 210, 66
 HISTORY_S = 300
 SETTLE_S = 0.15  # wait after changing exposure before judging a frame
@@ -33,11 +33,6 @@ HELP = [
     "o clipped pixels | h histogram | f focus aid | c capture synced set | "
     "s save settings | r reset stats | q quit",
 ]
-
-
-def text(img, s, org, scale=0.55, color=(255, 255, 255), thick=1):
-    cv2.putText(img, s, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), thick + 2, cv2.LINE_AA)
-    cv2.putText(img, s, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
 
 
 class RigView:
@@ -251,45 +246,8 @@ class RigView:
             cv2.rectangle(tile, (5, 5), (tw - 6, th - 6), (0, 255, 255), 2)
         return tile
 
-    def plot(self, area, title, value, lo, hi, ticks, scale=lambda v: v):
-        h, w = area.shape[:2]
-        x0, x1, y0, y1 = 48, w - 12, 26, h - 20
-        cv2.rectangle(area, (x0, y0), (x1, y1), (70, 70, 70), 1)
-        text(area, title, (x0, 18), 0.5, (200, 200, 200))
-        s_lo, s_hi = scale(lo), scale(hi)
-
-        def ypos(v):
-            v = min(max(v, lo), hi)
-            return int(y1 - (scale(v) - s_lo) / (s_hi - s_lo) * (y1 - y0))
-
-        for t in ticks:
-            y = ypos(t)
-            cv2.line(area, (x0, y), (x1, y), (50, 50, 50), 1)
-            text(area, f"{t:g}", (4, y + 5), 0.4, (170, 170, 170))
-        text(area, f"-{HISTORY_S // 60} min", (x0, h - 4), 0.4, (170, 170, 170))
-        text(area, "now", (x1 - 30, h - 4), 0.4, (170, 170, 170))
-        now_sec = int(time.monotonic())
-        for i, cid in enumerate(self.rig.ids):
-            secs = self.rig.stats[cid].seconds(HISTORY_S)
-            if len(secs) < 2:
-                continue
-            pts = np.array([(x1 - (now_sec - 1 - sec) * (x1 - x0) // HISTORY_S, ypos(value(f, l)))
-                            for sec, f, l in secs], np.int32)
-            cv2.polylines(area, [pts], False, COLORS[i % len(COLORS)], 1, cv2.LINE_AA)
-
     def draw_graphs(self, w):
-        g = np.full((GRAPH_H, w, 3), 25, np.uint8)
-        half = w // 2
-        self.plot(g[:, :half], "frame rate (fps)", lambda f, l: f, 0, 125, [0, 30, 60, 90, 120])
-        self.plot(g[:, half:], "frame loss % per second (log scale)",
-                  lambda f, l: 100.0 * l / (f + l) if f + l else 100.0, 0, 100, [0, 1, 10, 100],
-                  scale=lambda v: np.log10(1 + v))
-        x = half - 12
-        for i, cid in reversed(list(enumerate(self.rig.ids))):
-            label = f"{cid}"
-            x -= 10 * len(label) + 18
-            text(g, label, (x, 18), 0.5, COLORS[i % len(COLORS)], 1)
-        return g
+        return stats_graphs(self.rig, w, GRAPH_H, HISTORY_S)
 
     def draw_help(self, w):
         panel = np.full((HELP_H, w, 3), 15, np.uint8)

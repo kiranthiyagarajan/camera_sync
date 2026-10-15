@@ -20,7 +20,7 @@ from .board import Board
 from .config import CALIB_DIR
 from .imaging import decode
 from .rig import Rig
-from .rigview import COLORS, text
+from .plots import COLORS, text
 
 WINDOW = "calibrate"
 TICK_S = 0.12          # detection rate per camera
