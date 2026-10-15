@@ -7,19 +7,43 @@ graphs for the whole run (q stops early); the final graph is saved next to the l
 Ctrl+C stops early and still prints the summary.
 """
 import argparse
+import csv
 import time
 
 import numpy as np
 
 from . import config
-from .plots import COLORS, stats_graphs, text
+from .plots import COLORS, plot, stats_graphs, text
 from .rig import Rig
+from .sensors import read_temperatures
 from .stats import CsvLogger
 
 WINDOW = "soak test"
+TEMP_EVERY = 5  # seconds between temperature readings
+TEMP_COLORS = [(80, 80, 255), (0, 200, 255), (0, 255, 160), (255, 200, 0), (255, 120, 200),
+               (200, 200, 200), (120, 255, 255), (255, 80, 80), (160, 120, 255), (90, 160, 90)]
 
 
-def graph_window(rig, start, minutes, w=1280):
+def temp_graph(temps, w, h, span):
+    """Laptop temperatures over the run; temps is [(monotonic second, {sensor: C})]."""
+    g = np.full((h, w, 3), 25, np.uint8)
+    if not temps:
+        return g
+    names = list(temps[-1][1])
+    series = [(TEMP_COLORS[i % len(TEMP_COLORS)], [(t, v[n]) for t, v in temps if n in v])
+              for i, n in enumerate(names)]
+    lo = min(min(v.values()) for _, v in temps)
+    hi = max(max(v.values()) for _, v in temps)
+    lo, hi = 5 * int(lo // 5), 5 * int(hi // 5 + 1)
+    plot(g[:, :w - 260], "laptop temperatures (C)", series, lo, hi,
+         list(range(lo, hi + 1, 5 if hi - lo <= 40 else 10)), span)
+    for i, n in enumerate(names):
+        text(g, f"{n.split(' ', 1)[1][:22]:22} {temps[-1][1][n]:5.1f}",
+             (w - 255, 22 + 17 * i), 0.42, TEMP_COLORS[i % len(TEMP_COLORS)])
+    return g
+
+
+def graph_window(rig, start, minutes, temps, w=1280):
     """Header with live numbers per camera, then fps and loss graphs over the whole run."""
     now = time.monotonic()
     el, total = int(now - start), int(minutes * 60)
@@ -30,6 +54,8 @@ def graph_window(rig, start, minutes, w=1280):
         st = rig.stats[cid]
         fps, _ = st.window(3)
         _, loss10 = st.window(10)
+        if rig.corrupt[cid]:
+            text(header, f"corrupt {rig.corrupt[cid]}", (1110, y), 0.55, (0, 165, 255))
         status = "OK" if loss10 == 0 else "LOSING FRAMES"
         color = (0, 220, 0) if loss10 == 0 else (0, 0, 255) if loss10 > 0.01 else (0, 165, 255)
         y = 56 + 26 * i
@@ -38,7 +64,7 @@ def graph_window(rig, start, minutes, w=1280):
                      f" ({st.total_lost} frames)", (260, y), 0.55)
         text(header, status, (900, y), 0.55, color)
     span = max(60, min(total, 3600))
-    return np.vstack([header, stats_graphs(rig, w, 420, span)])
+    return np.vstack([header, stats_graphs(rig, w, 330, span), temp_graph(temps, w, 230, span)])
 
 
 def main():
@@ -72,10 +98,13 @@ def main():
         start = time.monotonic()
         next_print, next_log = start + args.every, start + 1
         canvas = None
+        temps = []  # (monotonic second, {sensor: C})
+        temp_path = logger.path[:-4] + "-temps.csv"
+        temp_file, temp_writer, next_temp = open(temp_path, "w", newline=""), None, start
         try:
             while time.monotonic() - start < args.minutes * 60:
                 if args.graph:
-                    canvas = graph_window(rig, start, args.minutes)
+                    canvas = graph_window(rig, start, args.minutes, temps)
                     cv2.imshow(WINDOW, canvas)
                     k = cv2.waitKey(200) & 0xFF
                     if k in (ord("q"), 27) or cv2.getWindowProperty(WINDOW, cv2.WND_PROP_AUTOSIZE) < 0:
@@ -86,6 +115,15 @@ def main():
                 now = time.monotonic()
                 for st in rig.stats.values():
                     st.tick(now)
+                if now >= next_temp:
+                    reading = read_temperatures()
+                    temps.append((int(now), reading))
+                    if temp_writer is None:
+                        temp_writer = csv.writer(temp_file)
+                        temp_writer.writerow(["elapsed_s"] + list(reading))
+                    temp_writer.writerow([int(now - start)] + [reading.get(n, "") for n in temps[0][1]])
+                    temp_file.flush()
+                    next_temp += TEMP_EVERY
                 for s in rig.poll_sets():
                     if s.complete:
                         last_set = s
@@ -99,7 +137,8 @@ def main():
                     parts = []
                     for cid in rig.ids:
                         fps, loss = rig.stats[cid].window(k)
-                        parts.append(f"{cid} {fps:5.1f} fps {loss:6.2%}")
+                        bad = f" ({rig.corrupt[cid]} corrupt)" if rig.corrupt[cid] else ""
+                        parts.append(f"{cid} {fps:5.1f} fps {loss:6.2%}{bad}")
                     el = int(now - start)
                     print(f"[{el // 60:02d}:{el % 60:02d}] " + " | ".join(parts), flush=True)
                     next_print += args.every
@@ -107,8 +146,9 @@ def main():
             print("stopped early")
         elapsed = time.monotonic() - start
         if args.graph:
-            canvas = graph_window(rig, start, args.minutes)
+            canvas = graph_window(rig, start, args.minutes, temps)
     logger.close()
+    temp_file.close()
     if args.graph:
         png = logger.path[:-4] + ".png"
         cv2.imwrite(png, canvas)
@@ -127,10 +167,28 @@ def main():
         verdict = "OK" if st.total_lost == 0 else "LOSING FRAMES"
         print(f"{cid} (port {rig.ports[cid]}): {st.total_frames} frames, lost {st.total_lost} "
               f"({st.total_loss:.2%}) {verdict}")
+        if st.total_lost:
+            corrupt = rig.corrupt[cid]
+            print(f"    of the lost frames: {corrupt} arrived corrupt (damaged in transfer), "
+                  f"{st.total_lost - corrupt} never arrived")
         print(f"    lost per minute: {[per_min[m] for m in sorted(per_min)]}")
+        onset = next((sec for sec, f, l in secs if l and l / (f + l) > 0.01), None)
+        if onset is not None and temps:
+            at = min(temps, key=lambda tv: abs(tv[0] - onset))[1]
+            first = temps[0][1]
+            el = max(0, int(onset - start))
+            print(f"    loss first above 1% at {el // 60:02d}:{el % 60:02d}; temperatures then "
+                  "(change since start): " + ", ".join(
+                      f"{n.split(' ', 1)[1]} {at[n]:.0f}C ({at[n] - first.get(n, at[n]):+.0f})"
+                      for n in at if n.startswith(("dell_ddv", "coretemp"))))
     if last_set:
         print(f"largest nearest-frame offset between cameras: {max_offset * 1e3:.2f} ms")
-    print(f"log: {logger.path}")
+    if temps:
+        a, b = temps[0][1], temps[-1][1]
+        print("temperatures start -> end: " + ", ".join(
+            f"{n.split(' ', 1)[1]} {a[n]:.0f}->{b[n]:.0f}C" for n in b
+            if n in a and n.startswith(("dell_ddv", "coretemp"))))
+    print(f"log: {logger.path}  temperatures: {temp_path}")
 
 
 if __name__ == "__main__":

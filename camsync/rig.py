@@ -34,6 +34,8 @@ class Rig:
         self.cams, self.clocks, self.stats = {}, {}, {}
         self.current = {}     # cam -> {control: value read back from the camera}
         self.mismatched = {}  # cam -> {control: (wanted, actual)} the camera didn't accept
+        self._running = False
+        self._thread = None  # set before opening cameras so close() works if opening fails
         try:
             for info in infos:
                 cam = Camera(info.path, fmt["width"], fmt["height"], fmt["fps"], nbuf)
