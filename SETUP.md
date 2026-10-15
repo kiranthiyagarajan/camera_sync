@@ -2,6 +2,13 @@
 
 Run everything from the project folder: `cd ~/camera_sync`
 
+**Easiest: open the "Camera Rig" app** from the app menu (Super key, type "Camera Rig";
+right-click it > Add to Favorites to pin it to the dock). It has a button for every
+tool below, shows which cameras are connected and calibrated, sets the frame rate and
+board size, and shows each tool's output. Stop = Ctrl+C for the running tool.
+To add it to the menu on another computer: `python3 -m camsync.app --install`.
+The commands below do the same from a terminal.
+
 ## 1. Connect
 - Cameras straight into the laptop's 3 USB-A ports, 4th camera on the Prolific hub **slot 2**
   in the USB-C port. Keyboard/mouse receivers on the hub too; nothing else on it.
