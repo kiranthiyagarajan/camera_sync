@@ -51,12 +51,41 @@ second is logged to `logs/rigview-*.csv`.
 Marker exposure is capped at 2 ms to limit motion blur. If auto exposure warns that a
 lot of the image is bright, look for reflections (shiny surfaces, lights in view).
 
-## 4. Check before each session
+## 4. Calibrate (after mounting and focusing; redo if a camera moves or is refocused)
+Needs `sudo apt install -y python3-scipy` for the final refinement.
+
+Board: ChArUco 10 x 7 squares, 35 mm squares, 25 mm markers, DICT_5X5_100 (in
+`rig.json` under `"board"`). Measure a printed square with a ruler and correct
+`square_mm`/`marker_mm` if the printer scaled it. Laser prints stay visible through
+the IR filter; inkjet often does not. Check in rigview first.
+
+1. Exposure for the board: `rigview`, press `b`, wait for OK, press `s`.
+2. Lenses:
+   ```
+   python3 -m camsync.calibrate intrinsics
+   ```
+   Move the board slowly through every camera's view (near, far, tilted, into the
+   corners). Views are captured automatically when the board is held still; aim for
+   25 views and an all-green coverage map per camera, then press `k`.
+   Good: rms below 0.5 px.
+3. Camera positions:
+   ```
+   python3 -m camsync.calibrate extrinsics
+   ```
+   First capture (`c`): board **flat in the centre of the cube**, seen by all 4 cameras.
+   That defines the world frame (origin at the board's first inner corner, z up).
+   Then 10-20 more captures in different positions and tilts, each seen by at least
+   2 cameras. Press `k`: it shows each camera's position and error, plus a board check
+   (triangulated corner spacing vs. the true 35 mm). Good: well under 0.5 mm.
+
+Results: `calib/intrinsics/<camera>.json`, `calib/extrinsics.json`.
+
+## 5. Check before each session
 ```
 python3 -m camsync.preflight        # ~35 s; RESULT: PASS / WARN / FAIL
 ```
 
-## 5. Long stability test
+## 6. Long stability test
 ```
 python3 -m camsync.soak --minutes 10    # Ctrl+C stops early with a summary
 ```

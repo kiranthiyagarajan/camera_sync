@@ -10,6 +10,7 @@ from .v4l2 import find_cameras
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_PATH = os.path.join(PROJECT_DIR, "rig.json")
+CALIB_DIR = os.path.join(PROJECT_DIR, "calib")
 LOG_DIR = os.path.join(PROJECT_DIR, "logs")
 CAPTURE_DIR = os.path.join(PROJECT_DIR, "captures")
 
@@ -48,6 +49,9 @@ def default_config():
         "format": {"width": 1280, "height": 720, "fps": 120},
         "cameras": {},    # name -> USB port, e.g. {"cam1": "3-1"}
         "controls": {},   # "all" or camera name -> {control: value}
+        # ChArUco calibration board; measure the printed square/marker size with a ruler.
+        "board": {"squares_x": 10, "squares_y": 7, "square_mm": 35.0, "marker_mm": 25.0,
+                  "dictionary": "DICT_5X5_100"},
     }
 
 

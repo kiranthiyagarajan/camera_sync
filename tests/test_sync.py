@@ -101,6 +101,18 @@ class SyncTest(unittest.TestCase):
         self.assertGreater(len(errs_after), 100)
         self.assertLess(max(errs_after), 0.0008)
 
+    def test_crawling_camera_counts_its_losses(self):
+        # A camera delivering one frame per second never re-locks; every gap is still loss.
+        clock = LinearClock(PERIOD)
+        t = 0.0
+        for _ in range(40):  # healthy start, then a frame every second
+            clock.update(t)
+            t += PERIOD
+        for _ in range(10):
+            t += 1.0
+            clock.update(t)
+        self.assertGreater(clock.dropped, 10 * 110)
+
     def test_dead_camera_times_out(self):
         events = [e for e in simulate(seconds=3) if not (e[1] == "cam2" and e[2] > 1.5)]
         ids = sorted({e[1] for e in events})

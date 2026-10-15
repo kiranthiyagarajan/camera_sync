@@ -48,9 +48,11 @@ class LinearClock:
     def update(self, t_raw):
         """Add a raw timestamp. Returns (frame_index, smoothed_time); the time is raw until warm."""
         if self.last_raw is not None and t_raw - self.last_raw > self.reset_gap:
+            # Frames lost during the stall. Counted even while re-locking after an earlier
+            # stall, or a camera stuck at a few fps would show no loss at all.
             missed = max(0, round((t_raw - self.last_raw) / self.period) - 1)
-            if self.locked:
-                self.dropped += missed  # frames lost during the stall
+            if self.n >= 0:
+                self.dropped += missed
             self.n += missed  # keep frame numbering continuous across the stall
             self._reset()
         if self.locked:
