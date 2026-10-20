@@ -2,15 +2,23 @@
 
   python3 -m camsync.calibrate intrinsics   # each camera's lens (do this first)
   python3 -m camsync.calibrate extrinsics   # where the cameras are (world frame)
+  python3 -m camsync.calibrate extrinsics --recompute calib/captures/<session>
+                                            # redo the computation from saved captures
 
 Set exposure for the board first (rigview: b, then s). Focus must not change after
 calibrating. Results go to calib/; captured images to calib/views/ (not in git).
+Extrinsics captures are saved as they are taken (calib/captures/<session>/), so a
+failed computation can be redone with --recompute.
 """
 import argparse
+import glob
+import json
 import os
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -65,6 +73,9 @@ class Calibrator:
         self.captures = []      # extrinsics: list of {cam: (corners, ids)}
         self.summary = []
         self.last_dict_check = time.monotonic()
+        self.grays = {}
+        self.computing = None   # background thread running compute_extrinsics
+        self.session_dir = None
         if mode == "extrinsics":
             missing = []
             for c in rig.ids:
@@ -95,6 +106,7 @@ class Calibrator:
     def update(self, results):
         now = time.monotonic()
         for cid, gray, det in results:
+            self.grays[cid] = gray
             st = self.state[cid]
             st.prev, st.det = st.det, det
             if det is None or len(det[1]) < MIN_CORNERS:
@@ -164,7 +176,39 @@ class Calibrator:
             self.say("at least 2 cameras must see the board")
             return
         self.captures.append(seen)
+        self.save_capture(len(self.captures), seen)
         self.say(f"capture {len(self.captures)}: board seen by {', '.join(sorted(seen))}", 3)
+
+    def save_capture(self, n, seen):
+        if self.session_dir is None:
+            self.session_dir = os.path.join(CALIB_DIR, "captures", time.strftime("%Y%m%d-%H%M%S"))
+            os.makedirs(self.session_dir)
+            with open(os.path.join(self.session_dir, "board.json"), "w") as f:
+                json.dump(self.board.spec, f)
+            print(f"captures are saved to {self.session_dir}")
+        data = {}
+        for c, (corners, ids) in seen.items():
+            data[f"{c}_corners"], data[f"{c}_ids"] = corners, ids
+        np.savez(os.path.join(self.session_dir, f"{n:03d}.npz"), **data)
+        for c, gray in self.grays.items():
+            if gray is not None:
+                cv2.imwrite(os.path.join(self.session_dir, f"{n:03d}_{c}.png"), gray)
+
+    def start_compute(self):
+        if self.computing is not None and self.computing.is_alive():
+            self.say("still computing...")
+            return
+        self.say("computing camera positions (a few seconds)...", 30)
+
+        def work():
+            try:
+                self.compute_extrinsics()
+            except Exception as e:  # keep the window and the captures
+                self.say(f"computation failed: {e!r} (captures kept; press k to retry)", 30)
+                import traceback
+                traceback.print_exc()
+        self.computing = threading.Thread(target=work, daemon=True)
+        self.computing.start()
 
     def compute_extrinsics(self):
         if not self.captures:
@@ -216,7 +260,7 @@ class Calibrator:
             if k in (ord("c"), ord(" ")):
                 self.capture_extrinsics()
             elif k == ord("k"):
-                self.compute_extrinsics()
+                self.start_compute()
             elif k == ord("u") and self.captures:
                 self.captures.pop()
                 self.say(f"removed capture {len(self.captures) + 1}", 3)
@@ -305,12 +349,41 @@ class Calibrator:
             self.pool.shutdown()
 
 
+def recompute(cfg, folder):
+    """Camera positions from a saved extrinsics session (calib/captures/<session>)."""
+    with open(os.path.join(folder, "board.json")) as f:
+        board = Board(json.load(f))
+    captures = []
+    for path in sorted(glob.glob(os.path.join(folder, "[0-9][0-9][0-9].npz"))):
+        d = np.load(path)
+        cams = {k[:-len("_corners")] for k in d.files if k.endswith("_corners")}
+        captures.append({c: (d[f"{c}_corners"], d[f"{c}_ids"]) for c in cams})
+    if not captures:
+        sys.exit(f"no captures in {folder}")
+    names = sorted({c for cap in captures for c in cap})
+    rig = SimpleNamespace(ids=names, ports={c: cfg["cameras"].get(c, "?") for c in names},
+                          width=cfg["format"]["width"], height=cfg["format"]["height"])
+    cal = Calibrator(rig, board, "extrinsics")
+    cal.captures = captures
+    print(f"{len(captures)} captures from {folder}")
+    cal.compute_extrinsics()
+    for c in sorted(cal.state):
+        if cal.state[c].result:
+            print(f"{c}: {cal.state[c].result}")
+    cal.pool.shutdown()
+
+
 def main():
     p = argparse.ArgumentParser(description="Guided ChArUco calibration.")
     p.add_argument("mode", choices=["intrinsics", "extrinsics"])
     p.add_argument("--config", default=config.DEFAULT_PATH)
+    p.add_argument("--recompute", metavar="DIR",
+                   help="extrinsics: compute from captures saved in DIR (no cameras needed)")
     args = p.parse_args()
     cfg = config.load(args.config)
+    if args.recompute:
+        recompute(cfg, args.recompute)
+        return
     cams, missing, _ = config.resolve(cfg)
     for name in missing:
         print(f"WARNING: {name} (port {cfg['cameras'][name]}) is not connected")

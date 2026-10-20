@@ -116,7 +116,7 @@ def residuals_by_camera(board, captures, intr, cams, boards):
     return {c: np.vstack(v) if v else np.zeros((0, 2)) for c, v in out.items()}
 
 
-def bundle_adjust(board, captures, intr, cams, boards, f_scale=1.0):
+def bundle_adjust(board, captures, intr, cams, boards, f_scale=1.0, max_nfev=100):
     """Refine all camera poses and board poses jointly (board 0 fixed = world frame),
     minimising reprojection error with a robust (Huber) loss. Needs scipy."""
     from scipy.optimize import least_squares
@@ -163,8 +163,10 @@ def bundle_adjust(board, captures, intr, cams, boards, f_scale=1.0):
             j = n_c + board_idx.index(m)
             sparsity[r, 6 * j:6 * j + 6] = 1
         row += 2 * len(ids)
+    # Capped: the last ~2000 iterations change camera centres by < 0.1 mm but take minutes
+    # (the window froze and was force-quit).
     sol = least_squares(fun, pack(), jac_sparsity=sparsity, loss="huber", f_scale=f_scale,
-                        x_scale="jac", method="trf")
+                        x_scale="jac", method="trf", max_nfev=max_nfev)
     Tc, Tb = unpack(sol.x)
     new_boards = [Tb.get(m) for m in range(len(captures))]
     return {c: Tc[i] for i, c in enumerate(cam_ids)}, new_boards

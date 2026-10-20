@@ -89,6 +89,10 @@ the IR filter; inkjet often does not. Check in rigview first.
 
 Results: `calib/intrinsics/<camera>.json`, `calib/extrinsics.json`.
 
+Each camera-position capture is saved to `calib/captures/<session>/` as you take it.
+If the computation fails, redo it without the cameras:
+`python3 -m camsync.calibrate extrinsics --recompute calib/captures/<session>`.
+
 ## 4b. Reflection mask (after calibration; redo if a camera moves)
 Static bright spots (shiny cube rails, other cameras' IR rings) would look like markers.
 1. Put a few markers in view of every camera; in the Live dashboard press `m` (marker
