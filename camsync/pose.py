@@ -68,3 +68,32 @@ def disks(points, seen_from=None, radius=RIM_RADIUS_MM, link=LINK_MM, n_disks=N_
         v = centres[min(len(out) - 1, i + 1)] - centres[max(0, i - 1)]
         d["direction"] = v / np.linalg.norm(v) if np.linalg.norm(v) > 0 else d["normal"]
     return out
+
+
+def tangents(ds):
+    """Backbone tangent per disk: (unit vector or None, fitted). fitted means it is the
+    disk's plane normal (3+ markers); otherwise it comes from neighbouring centres."""
+    out = []
+    for d in ds:
+        v = d["direction"]
+        if d["normal"] is not None:
+            n = d["normal"]
+            out.append((-n if v is not None and n @ v < 0 else n, True))
+        else:
+            out.append((v, False))
+    return out
+
+
+def bend_angles(ds):
+    """Bend in degrees of each segment (between neighbouring disks) and base to tip:
+    (list of (degrees or None, fitted), (degrees or None, fitted)). fitted is True when
+    both tangents are disk normals."""
+    ts = tangents(ds)
+
+    def angle(a, b):
+        if a[0] is None or b[0] is None:
+            return None, False
+        return float(np.degrees(np.arccos(np.clip(a[0] @ b[0], -1, 1)))), a[1] and b[1]
+    segs = [angle(ts[i], ts[i + 1]) for i in range(len(ts) - 1)]
+    total = angle(ts[0], ts[-1]) if len(ts) > 1 else (None, False)
+    return segs, total

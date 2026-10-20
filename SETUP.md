@@ -108,8 +108,11 @@ Matte black tape on shiny rails, or hoods on the IR rings, shrinks the mask.
 ## 4c. Track the robot (proof of concept)
 App: "Track robot (proof of concept)" (or `python3 -m camsync.track --exposure 5.5 --gain 63`).
 Shows each camera with detected blobs (green circles) and triangulated markers (yellow =
-seen, red = predicted but not detected), then front/side/top views of the markers, disk
-centres and backbone (tip in red). `r` records disk centres and directions to
+seen, red = predicted but not detected) and the pose drawn over it (disk rims, backbone,
+base axes; `o` toggles). Below: a 3D view of cameras, markers, disk rims and backbone (tip
+in red; left-drag rotates, wheel or right-drag zooms, `v` resets) and the bend angle of
+each segment and base to tip (`~` = estimated from disk centres because a disk has fewer
+than 3 markers, so its normal is unknown). `r` records disk centres and directions to
 `logs/track-*.csv`. Needs lens + position calibration made with the same lens files:
 redo "2. Camera positions" after every lens calibration.
 

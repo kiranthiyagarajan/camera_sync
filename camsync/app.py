@@ -90,7 +90,8 @@ class App(Gtk.Window):
 
         self.heading(left, "Tracking")
         self.tool_button(left, "Track robot (proof of concept)",
-                         "Live markers, disks and backbone at 5.5 ms exposure, gain 63. "
+                         "Live markers, 3D pose view and bend angles at 5.5 ms exposure, gain 63. "
+                         "Drag rotates the 3D view, o toggles the camera overlay, "
                          "r records disk poses to logs/track-*.csv, q quits.",
                          "track", lambda: ["--exposure", "5.5", "--gain", "63"])
 

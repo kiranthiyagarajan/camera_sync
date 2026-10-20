@@ -1,8 +1,9 @@
 """Live proof-of-concept tracking: python3 -m camsync.track
 
 Detects markers in all cameras, triangulates them, groups them into disks and shows
-the backbone in front, side and top views. Press r to record disk poses to
-logs/track-*.csv, q to quit. Needs calib/intrinsics, calib/extrinsics.json and
+the pose in a 3D view (left-drag rotates, wheel or right-drag zooms, v resets) and
+over each camera image (o toggles), with the bend angle of each segment. Press r to
+record disk poses to logs/track-*.csv, q to quit. Needs calib/intrinsics, calib/extrinsics.json and
 (recommended) calib/masks from the reflection-mask tool.
 """
 import argparse
@@ -15,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
-from . import calib, config, geometry as geo, mask, markers, pose
+from . import calib, config, geometry as geo, mask, markers, pose, view3d
 from .config import LOG_DIR
 from .imaging import decode, downscale2
 from .plots import COLORS, text
@@ -23,8 +24,8 @@ from .recon import Reconstructor
 from .rig import Rig
 
 WINDOW = "track"
-VIEW = 360            # px per 3D view panel
-SCALE = 0.9           # px per mm in the 3D views
+VIEW_H = 440          # px, height of the 3D view and info panel
+INFO_W = 400
 
 
 class Tracker:
@@ -40,6 +41,8 @@ class Tracker:
         self.writer = self.file = None
         self.rate = 0.0
         self.centre = None  # 3D view centre, follows the robot
+        self.orbit = view3d.Orbit(2 * self.tw - INFO_W, VIEW_H)
+        self.overlay = True
 
     def process(self, s):
         def one(c):
@@ -74,7 +77,7 @@ class Tracker:
             self.writer.writerow([f"{t:.6f}", i, *np.round(d["centre"], 2), *np.round(v, 4), d["n"]])
 
     # ---- drawing ---------------------------------------------------------------
-    def tile(self, i, c, gray, dets, points):
+    def tile(self, i, c, gray, dets, points, ds):
         tw, th = self.tw, self.th
         if gray is None:
             img = np.zeros((th, tw, 3), np.uint8)
@@ -86,6 +89,8 @@ class Tracker:
             img[m2] = (img[m2] * 0.5 + (0, 0, 90)).astype(np.uint8)
         for x, y in dets:
             cv2.circle(img, (int(x / 2), int(y / 2)), 9, (0, 255, 0), 1)
+        if self.overlay and c in self.cams:
+            view3d.draw_overlay(img, self.cams[c], *self.intr[c], ds, 0.5)
         for X, views, _ in points:
             if c in self.cams:
                 px = geo.project(X[None], self.cams[c], *self.intr[c])[0] / 2
@@ -99,43 +104,32 @@ class Tracker:
             target = xyz.mean(axis=0)
             self.centre = target if self.centre is None else 0.8 * self.centre + 0.2 * target
         ctr = self.centre if self.centre is not None else np.zeros(3)
-        panels = []
-        for name, (a, b) in (("front x-z", (0, 2)), ("side y-z", (1, 2)), ("top x-y", (0, 1))):
-            p = np.full((VIEW, VIEW, 3), 25, np.uint8)
-
-            def px(X):
-                return (int(VIEW / 2 + (X[a] - ctr[a]) * SCALE), int(VIEW / 2 - (X[b] - ctr[b]) * SCALE))
-            for g in range(-200, 201, 50):  # 50 mm grid
-                cv2.line(p, px(ctr + _axis(a, g) - _axis(b, 400)), px(ctr + _axis(a, g) + _axis(b, 400)),
-                         (45, 45, 45), 1)
-                cv2.line(p, px(ctr + _axis(b, g) - _axis(a, 400)), px(ctr + _axis(b, g) + _axis(a, 400)),
-                         (45, 45, 45), 1)
-            for X in xyz:
-                cv2.circle(p, px(X), 3, (200, 200, 200), -1)
-            for d in ds:  # each marker linked to its disk centre
-                for X in d["markers"]:
-                    cv2.line(p, px(X), px(d["centre"]), (90, 90, 90), 1)
-            for i in range(len(ds) - 1):
-                cv2.line(p, px(ds[i]["centre"]), px(ds[i + 1]["centre"]), (0, 200, 255), 2)
-            for i, d in enumerate(ds):
-                col = (0, 0, 255) if i == len(ds) - 1 else (0, 255, 0)
-                cv2.circle(p, px(d["centre"]), 6, col, 2)
-            text(p, name + "  (grid 50 mm)", (8, 20), 0.5, (200, 200, 200))
-            panels.append(p)
-        info = np.full((VIEW, VIEW, 3), 15, np.uint8)
+        p = np.full((VIEW_H, self.orbit.w, 3), 25, np.uint8)
+        view3d.draw_scene(p, self.orbit, ctr, self.cams, self.intr, (self.rig.width, self.rig.height),
+                          xyz, ds)
+        text(p, "drag rotate, wheel/right-drag zoom, v reset (grid 50 mm)", (8, 20), 0.5,
+             (200, 200, 200))
+        info = np.full((VIEW_H, INFO_W, 3), 15, np.uint8)
         lines = [f"{len(xyz)} markers, {len(ds)} disks   {self.rate:.0f} Hz",
-                 "REC " + os.path.basename(self.path) if self.file else "r record   q quit"]
+                 "REC " + os.path.basename(self.path) if self.file else "r record  o overlay  q quit"]
         for i, d in enumerate(ds):
             c = d["centre"]
-            tag = "tip " if i == len(ds) - 1 else f"disk{i}"
+            tag = "tip  " if i == len(ds) - 1 else f"disk{i}"
             lines.append(f"{tag} ({c[0]:6.0f},{c[1]:6.0f},{c[2]:6.0f}) n={d['n']}")
+        lines.append("")
+        segs, total = pose.bend_angles(ds)
+        for i, a in enumerate(segs):
+            lines.append(f"bend disk{i}-{'tip' if i == len(segs) - 1 else f'disk{i + 1}'}: " + _deg(a))
+        if len(ds) > 1:
+            lines.append("bend base-tip: " + _deg(total))
+            lines.append("~ = from disk centres (disk normal unknown)")
         for i, ln in enumerate(lines):
             text(info, ln, (8, 22 + 22 * i), 0.5, (0, 255, 255) if i < 2 else (220, 220, 220))
-        panels.append(info)
-        return np.hstack(panels)
+        return np.hstack([p, info])
 
     def run(self, duration=None, snapshot=None):
         cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+        cv2.setMouseCallback(WINDOW, lambda e, x, y, f, _: self.orbit.mouse(e, x, y - 2 * self.th, f))
         start = last = time.monotonic()
         sized = False
         try:
@@ -152,7 +146,7 @@ class Tracker:
                 last = now
                 if self.writer:
                     self.record(s.t, ds)
-                tiles = [self.tile(i, c, g, d, points) for i, (c, g, d) in enumerate(res)]
+                tiles = [self.tile(i, c, g, d, points, ds) for i, (c, g, d) in enumerate(res)]
                 while len(tiles) < 4:
                     tiles.append(np.zeros_like(tiles[0]))
                 grid = np.vstack([np.hstack(tiles[0:2]), np.hstack(tiles[2:4])])
@@ -172,6 +166,10 @@ class Tracker:
                     break
                 if k == ord("r"):
                     self.toggle_record()
+                if k == ord("o"):
+                    self.overlay = not self.overlay
+                if k == ord("v"):
+                    self.orbit.reset()
                 if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_AUTOSIZE) < 0:
                     break
         finally:
@@ -181,10 +179,9 @@ class Tracker:
             self.pool.shutdown()
 
 
-def _axis(i, v):
-    e = np.zeros(3)
-    e[i] = v
-    return e
+def _deg(a):
+    deg, fitted = a
+    return "-" if deg is None else f"{'' if fitted else '~'}{deg:5.1f} deg"
 
 
 def _pad(img, w):
