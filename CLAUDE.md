@@ -39,18 +39,13 @@ https://github.com/kiranthiyagarajan/camera_sync (public, branch main).
   receivers can share it).
 
 ## Known problems / findings
-- **Ports 3-3 and 3-4 lose frames** after ~1–2 min of streaming, growing over time
-  (3-3 collapses to a few fps; 3-4 reaches 5–15%), at both 120 and 60 fps. A swap test
-  showed it **follows the port, not the camera or cable**. No kernel USB errors; earlier
-  losses were mostly frames the driver discarded as incomplete (damaged in transfer).
-  All ports have identical power-management settings. Suspected laptop-side
-  signal/power path (redriver, shared power switch) or heat. Ports 3-1 and the hub
-  have never lost a frame. Diagnosis in progress (2026-10-16): run A = 3-3 alone
-  (3-4 empty), run B = 3-4 alone, run C = both with a fan on the laptop side. Soak
-  reports corrupt vs missing frames when `uvcvideo nodrop=1`
-  (`echo 1 | sudo tee /sys/module/uvcvideo/parameters/nodrop`, resets on reboot) and logs
-  laptop temperatures. Workaround if the ports are bad: 2 powered hubs (2 cameras each)
-  on 3-1 and USB-C; the user doesn't have one yet.
+- **Frame loss on ports 3-3/3-4: fixed (2026-10-21) by changing the cable.** The user
+  then streamed 2 h with no drops, and a 30 s check on 2026-10-21 lost 0 frames on all four
+  cameras (cam4 on 3-4). Before the fix, frames were lost after ~1–2 min and kept getting
+  worse. An earlier swap test had seemed to show the problem following the port; in
+  hindsight the cable was bad. If drops come back, suspect cables first. Soak reports
+  corrupt vs missing frames when `uvcvideo nodrop=1`
+  (`echo 1 | sudo tee /sys/module/uvcvideo/parameters/nodrop`, resets on reboot).
 - Camera heat also matters: ventilating a camera cut its drops. Short (≤60 s) tests
   miss these problems, so soak for 3–10 min.
 - Inter-camera offset comes from each camera's own crystal (2–95 ppm drift, changing
@@ -72,7 +67,7 @@ https://github.com/kiranthiyagarajan/camera_sync (public, branch main).
   until every clock is warm; per-camera stats; `latest` frame per camera; `queue`
   size (use 1024 when counting sets, small for live display).
 - `config.py` (rig.json: camera names by port, format/fps, controls, ChArUco board
-  10x7, 35 mm squares, 25 mm markers, DICT_5X5_100), `stats.py`, `imaging.py` (decode,
+  7x5, 35 mm squares, 25 mm markers, DICT_6X6_50), `stats.py`, `imaging.py` (decode,
   auto exposure marker/board modes, focus score, cover-detector), `plots.py`,
   `sensors.py` (hwmon temps), `geometry.py`, `board.py`, `calib.py` (intrinsics,
   extrinsics init + bundle adjustment, z-up world from the board lying flat in the
@@ -116,4 +111,11 @@ Agreed mocap plan (build one step at a time, each with a go-ahead):
    per-segment rigid fit (Kabsch) → segment poses.
 5. Piecewise-constant-curvature backbone + tip pose; real-time output (Python API +
    UDP stream) and recording for training the control model.
-Expected precision ~0.1 mm (≈0.3–0.4 mm/pixel at 0.35–0.45 m, 6–8 mm markers ≈ 15–25 px).
+Lenses are wide (fx ≈ 505–550 px, ~100° horizontal field of view): ≈0.8 mm/pixel at 0.4 m, so
+6–8 mm markers ≈ 8–10 px. Expect ~0.1–0.3 mm precision.
+
+Calibration notes (2026-10-21): the board is now 7x5, DICT_6X6_50. Saved intrinsics were
+made with the old 10x7 board, and fx/fy differ by up to 15%, so redo them. At floor
+distance the 7x5 board isn't detected (markers ~10–12 px, dim), so hold it at ~25–35 cm.
+The default exposure (8.3 ms, gain 63) suits calibration; for tracking use 1–2 ms.
+cam1/cam3 see ~15 bright reflections (cube rails, opposite IR rings), so a mask is needed.

@@ -61,7 +61,7 @@ lot of the image is bright, look for reflections (shiny surfaces, lights in view
 ## 4. Calibrate (after mounting and focusing; redo if a camera moves or is refocused)
 Needs `sudo apt install -y python3-scipy` for the final refinement.
 
-Board: ChArUco 10 x 7 squares, 35 mm squares, 25 mm markers, DICT_5X5_100 (in
+Board: ChArUco 7 x 5 squares, 35 mm squares, 25 mm markers, DICT_6X6_50 (in
 `rig.json` under `"board"`). Measure a printed square with a ruler and correct
 `square_mm`/`marker_mm` if the printer scaled it. Laser prints stay visible through
 the IR filter; inkjet often does not. Check in rigview first.

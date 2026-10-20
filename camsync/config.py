@@ -50,8 +50,8 @@ def default_config():
         "cameras": {},    # name -> USB port, e.g. {"cam1": "3-1"}
         "controls": {},   # "all" or camera name -> {control: value}
         # ChArUco calibration board; measure the printed square/marker size with a ruler.
-        "board": {"squares_x": 10, "squares_y": 7, "square_mm": 35.0, "marker_mm": 25.0,
-                  "dictionary": "DICT_5X5_100"},
+        "board": {"squares_x": 7, "squares_y": 5, "square_mm": 35.0, "marker_mm": 25.0,
+                  "dictionary": "DICT_6X6_50"},
     }
 
 
