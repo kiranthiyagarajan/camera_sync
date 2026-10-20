@@ -135,7 +135,7 @@ def bundle_adjust(board, captures, intr, cams, boards, f_scale=1.0):
     def pack():
         x = [np.r_[geo.from_T(cams[c])] for c in cam_ids]
         x += [np.r_[geo.from_T(boards[m])] for m in board_idx]
-        return np.concatenate([np.r_[r, t] for r, t in x])
+        return np.concatenate(x)
 
     def unpack(x):
         Tc = [geo.to_T(x[6 * i:6 * i + 3], x[6 * i + 3:6 * i + 6]) for i in range(n_c)]
