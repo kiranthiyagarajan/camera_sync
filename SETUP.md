@@ -101,6 +101,14 @@ Static bright spots (shiny cube rails, other cameras' IR rings) would look like 
    pixels. Press `k` in the dashboard to show the mask.
 Matte black tape on shiny rails, or hoods on the IR rings, shrinks the mask.
 
+## 4c. Track the robot (proof of concept)
+App: "Track robot (proof of concept)" (or `python3 -m camsync.track --exposure 5.5 --gain 63`).
+Shows each camera with detected blobs (green circles) and triangulated markers (yellow =
+seen, red = predicted but not detected), then front/side/top views of the markers, disk
+centres and backbone (tip in red). `r` records disk centres and directions to
+`logs/track-*.csv`. Needs lens + position calibration made with the same lens files:
+redo "2. Camera positions" after every lens calibration.
+
 ## 5. Check before each session
 ```
 python3 -m camsync.preflight        # ~35 s; RESULT: PASS / WARN / FAIL

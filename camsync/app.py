@@ -88,6 +88,12 @@ class App(Gtk.Window):
                          "all markers: bright spots seen now (rails, IR rings) are masked",
                          "mask")
 
+        self.heading(left, "Tracking")
+        self.tool_button(left, "Track robot (proof of concept)",
+                         "Live markers, disks and backbone at 5.5 ms exposure, gain 63. "
+                         "r records disk poses to logs/track-*.csv, q quits.",
+                         "track", lambda: ["--exposure", "5.5", "--gain", "63"])
+
         self.heading(left, "Checks")
         self.tool_button(left, "Preflight check (about 35 s)",
                          "Cameras present, settings accepted, 30 s streaming test", "preflight")
