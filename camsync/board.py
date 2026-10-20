@@ -16,7 +16,13 @@ class Board:
             spec["squares_x"], spec["squares_y"], float(spec["square_mm"]),
             float(spec["marker_mm"]), self.dictionary)
         self.corners3d = np.asarray(self.board.chessboardCorners, float).reshape(-1, 3)
-        self.params = cv2.aruco.DetectorParameters_create()
+        # Relaxed for small, oblique, partly clipped markers (~2 px per bit at cube distances).
+        p = self.params = cv2.aruco.DetectorParameters_create()
+        p.perspectiveRemovePixelPerCell = 8
+        p.perspectiveRemoveIgnoredMarginPerCell = 0.25
+        p.errorCorrectionRate = 0.8
+        p.minMarkerPerimeterRate = 0.01
+        p.adaptiveThreshWinSizeMin, p.adaptiveThreshWinSizeMax, p.adaptiveThreshWinSizeStep = 3, 33, 6
 
     @property
     def n_corners(self):
@@ -25,9 +31,14 @@ class Board:
     def detect(self, gray, K=None, dist=None):
         """Find the board's chessboard corners. Returns (corners (N,2), ids (N,)) or None.
         With camera intrinsics, corners hidden between detected markers are recovered too."""
-        mk, ids, rejected = cv2.aruco.detectMarkers(gray, self.dictionary, parameters=self.params)
+        # Markers are found in a 2x enlarged image (the detector needs a few pixels per bit),
+        # then mapped back; chessboard corners are refined in the original image.
+        big = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        mk, ids, rejected = cv2.aruco.detectMarkers(big, self.dictionary, parameters=self.params)
         if ids is None or len(ids) < 2:
             return None
+        mk = [(c + 0.5) / 2 - 0.5 for c in mk]
+        rejected = [(c + 0.5) / 2 - 0.5 for c in rejected]
         mk, ids, _, _ = cv2.aruco.refineDetectedMarkers(gray, self.board, mk, ids, rejected,
                                                         cameraMatrix=K, distCoeffs=dist)
         if ids is None or len(ids) < 2:
