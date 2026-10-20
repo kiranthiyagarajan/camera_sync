@@ -89,6 +89,18 @@ the IR filter; inkjet often does not. Check in rigview first.
 
 Results: `calib/intrinsics/<camera>.json`, `calib/extrinsics.json`.
 
+## 4b. Reflection mask (after calibration; redo if a camera moves)
+Static bright spots (shiny cube rails, other cameras' IR rings) would look like markers.
+1. Put a few markers in view of every camera; in the Live dashboard press `m` (marker
+   auto exposure, max 2 ms), then `s` to save. Close the dashboard.
+2. Remove or cover all markers (and the calibration board), IR rings on.
+3. App: "3. Reflection mask" (or `python3 -m camsync.mask`). It records 3 s, masks every
+   pixel that got bright plus a 4 px margin, and saves `calib/masks/<camera>.png` and
+   `calib/masks/preview.png` (masked areas red). A few % masked is normal.
+4. Markers back in view: press `m` again. Marker auto exposure now ignores masked
+   pixels. Press `k` in the dashboard to show the mask.
+Matte black tape on shiny rails, or hoods on the IR rings, shrinks the mask.
+
 ## 5. Check before each session
 ```
 python3 -m camsync.preflight        # ~35 s; RESULT: PASS / WARN / FAIL

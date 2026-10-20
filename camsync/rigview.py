@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
-from . import config
+from . import config, mask
 from .config import CAPTURE_DIR, max_exposure
 from .imaging import (AutoExposure, decode, downscale2, focus_score, histogram_image,
                       saturation_mask2)
@@ -30,7 +30,7 @@ SETTLE_S = 0.15  # wait after changing exposure before judging a frame
 HELP = [
     "1-4 select camera, 0 all | e/E exposure -/+ | g/G gain -/+ | "
     "m auto exposure (markers) | b auto exposure (calibration board)",
-    "o clipped pixels | h histogram | f focus aid | c capture synced set | "
+    "o clipped pixels | k reflection mask | h histogram | f focus aid | c capture synced set | "
     "s save settings | r reset stats | q quit",
 ]
 
@@ -41,7 +41,8 @@ class RigView:
         self.cfg_path = cfg_path
         self.tw, self.th = rig.width // 2, rig.height // 2
         self.sel = None  # selected camera, None = all
-        self.show_clip = self.show_hist = self.show_focus = False
+        self.show_clip = self.show_hist = self.show_focus = self.show_mask = False
+        self.masks = {c: mask.load(c, (rig.height, rig.width)) for c in rig.ids}
         self.auto = {}  # cam -> [AutoExposure, settle_until]
         self.focus_peak = {}
         self.last_set = None
@@ -92,9 +93,12 @@ class RigView:
         for cid in self.selected():
             ctl = self.rig.current[cid]
             self.auto[cid] = [AutoExposure(mode, ctl["exposure_time_absolute"], ctl["gain"],
-                                           fps=self.rig.fps), 0.0]
+                                           fps=self.rig.fps, mask=self.masks[cid]), 0.0]
         hint = ("keep markers in view of every camera" if mode == "marker"
                 else "hold the calibration board in view")
+        unmasked = [c for c in self.selected() if self.masks[c] is None]
+        if mode == "marker" and unmasked:
+            hint += f" (no reflection mask for {', '.join(unmasked)}: reflections count as markers)"
         self.say(f"auto exposure ({mode}) started: {hint}", 6)
 
     def run_auto(self, cid, frame, gray):
@@ -172,6 +176,12 @@ class RigView:
             self.start_auto("board")
         elif k == ord("o"):
             self.show_clip = not self.show_clip
+        elif k == ord("k"):
+            self.show_mask = not self.show_mask
+            if self.show_mask:
+                none = [c for c in self.rig.ids if self.masks[c] is None]
+                if none:
+                    self.say(f"no reflection mask for {', '.join(none)} (run: python3 -m camsync.mask)")
         elif k == ord("h"):
             self.show_hist = not self.show_hist
         elif k == ord("f"):
@@ -200,6 +210,10 @@ class RigView:
             if cid in self.auto:
                 self.run_auto(cid, frame, gray)
             tile[:] = cv2.cvtColor(downscale2(gray)[:th, :tw], cv2.COLOR_GRAY2BGR)
+            m = self.masks[cid]
+            if self.show_mask and m is not None:
+                m2 = m[::2, ::2][:th, :tw]
+                tile[m2] = (tile[m2] * 0.5 + (0, 0, 127)).astype(np.uint8)
             if self.show_clip:
                 tile[saturation_mask2(gray)[:th, :tw]] = (0, 0, 255)
             if self.show_hist:

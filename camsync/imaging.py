@@ -49,9 +49,13 @@ def focus_score(gray):
     return float(cv2.Laplacian(crop, cv2.CV_64F).var())
 
 
-def exposure_metrics(gray):
+def exposure_metrics(gray, mask=None):
+    """Brightness statistics; pixels where `mask` is True (static reflections) are ignored."""
     # Median filter removes isolated hot pixels but keeps any marker of 5+ pixels.
     filtered = cv2.medianBlur(gray, 3)
+    if mask is not None:
+        keep = ~mask
+        gray, filtered = gray[keep], filtered[keep]
     return {
         "peak": int(filtered.max()),
         "p995": float(np.percentile(gray, 99.5)),
@@ -68,6 +72,7 @@ class AutoExposure:
             215-250), exposure capped at 2 ms to limit motion blur, gain only if needed.
     board:  calibration board well exposed (99.5th percentile in 180-220, <0.1% clipped),
             up to the full frame time.
+    A reflection mask (see mask.py) keeps rails and IR rings from being taken for markers.
     Brightness is roughly linear in exposure because gamma is fixed at 1.0. Gain is
     reset to 0 and only added in coarse steps once exposure is at its cap; exposure
     then does the fine adjustment.
@@ -79,8 +84,9 @@ class AutoExposure:
     }
     GAIN_STEP = 8
 
-    def __init__(self, mode, exposure, gain, fps=120, max_gain=63, max_iter=15):
+    def __init__(self, mode, exposure, gain, fps=120, max_gain=63, max_iter=15, mask=None):
         self.mode = mode
+        self.mask = mask  # True = static reflection, ignored when judging brightness
         self.p = dict(self.MODES[mode])
         frame_cap = max_exposure(fps)  # exposure can't exceed one frame
         self.p["max_exposure"] = min(self.p["max_exposure"] or frame_cap, frame_cap)
@@ -101,7 +107,7 @@ class AutoExposure:
             # Start from no gain (less noise); this frame used the old gain, so skip it.
             self.iter, self.gain = 1, 0
             return self.exposure, self.gain
-        m = self.metrics = exposure_metrics(gray)
+        m = self.metrics = exposure_metrics(gray, self.mask)
         p = self.p
         value = m[p["metric"]]
         too_bright = (m["clipped"] > 0) if self.mode == "marker" else (m["clipped"] > 0.001)

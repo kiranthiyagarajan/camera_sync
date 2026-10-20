@@ -73,7 +73,8 @@ https://github.com/kiranthiyagarajan/camera_sync (public, branch main).
   extrinsics init + bundle adjustment, z-up world from the board lying flat in the
   first capture, triangulated board check).
 - Tools (also buttons in `app.py`): `rigview` (live dashboard), `assign` (name cameras
-  by covering them), `calibrate intrinsics|extrinsics`, `preflight`, `soak [--graph]`,
+  by covering them), `calibrate intrinsics|extrinsics`, `mask` (static reflection
+  mask → calib/masks/<cam>.png, used by marker auto exposure and rigview `k`), `preflight`, `soak [--graph]`,
   `config --fps 60|120`. Usage for the user is in SETUP.md. Tests:
   `python3 -m unittest discover tests` (bundle adjustment test skipped without scipy).
 

@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from camsync import config
+from camsync import config, mask
 from camsync.imaging import AutoExposure, CoverDetector
 from camsync.stats import CamStats
 from camsync.v4l2 import CameraInfo
@@ -64,11 +64,15 @@ def fake_camera(exposure, gain, marker_rate, background_rate, rng, board=False):
     return np.clip(img, 0, 255).astype(np.uint8)
 
 
-def run_auto(mode, marker_rate, background_rate, exposure=50, gain=0, board=False):
+def run_auto(mode, marker_rate, background_rate, exposure=50, gain=0, board=False,
+             reflection_rate=None, ignore=None):
     rng = np.random.default_rng(0)
-    ae = AutoExposure(mode, exposure, gain)
+    ae = AutoExposure(mode, exposure, gain, mask=ignore)
     for _ in range(40):
-        res = ae.step(fake_camera(ae.exposure, ae.gain, marker_rate, background_rate, rng, board))
+        img = fake_camera(ae.exposure, ae.gain, marker_rate, background_rate, rng, board)
+        if reflection_rate is not None:  # a static glint, e.g. a cube rail
+            img[20:30, 20:80] = min(255, reflection_rate * ae.exposure * (1 + ae.gain / 16))
+        res = ae.step(img)
         if res is None:
             return ae
     raise AssertionError("auto exposure never finished")
@@ -101,6 +105,27 @@ class AutoExposureTest(unittest.TestCase):
         ae = run_auto("board", marker_rate=2.0, background_rate=0.6, exposure=10, board=True)
         self.assertTrue(ae.ok, ae.message)
         self.assertTrue(180 <= ae.metrics["p995"] <= 220)
+
+
+    def test_marker_mode_ignores_masked_reflection(self):
+        ignore = np.zeros((360, 640), bool)
+        ignore[15:35, 15:85] = True
+        ae = run_auto("marker", marker_rate=12, background_rate=0.2, exposure=10,
+                      reflection_rate=60, ignore=ignore)
+        self.assertTrue(ae.ok, ae.message)
+        self.assertTrue(215 <= ae.metrics["peak"] <= 250)  # tuned on the markers
+        unmasked = run_auto("marker", marker_rate=12, background_rate=0.2, exposure=10,
+                            reflection_rate=60)
+        self.assertLess(unmasked.exposure, ae.exposure)  # without the mask the glint wins
+
+
+class MaskTest(unittest.TestCase):
+    def test_bright_areas_grow_by_margin(self):
+        peak = np.full((50, 50), 20, np.uint8)
+        peak[20:23, 30:33] = 200
+        m = mask.build(peak, threshold=100, grow=4)
+        self.assertTrue(m[21, 31] and m[21, 36] and m[17, 31])
+        self.assertFalse(m[21, 38] or m[5, 5])
 
 
 class CoverDetectorTest(unittest.TestCase):

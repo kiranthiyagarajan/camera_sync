@@ -83,6 +83,10 @@ class App(Gtk.Window):
                          "First capture: board flat in the centre of the cube. Then more board "
                          "positions (c each), k to compute and save.",
                          "calibrate", lambda: ["extrinsics"])
+        self.tool_button(left, "3. Reflection mask (about 5 s)",
+                         "Set the tracking exposure first (m in the Live dashboard), then remove "
+                         "all markers: bright spots seen now (rails, IR rings) are masked",
+                         "mask")
 
         self.heading(left, "Checks")
         self.tool_button(left, "Preflight check (about 35 s)",
