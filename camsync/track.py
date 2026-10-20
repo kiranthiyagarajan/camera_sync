@@ -33,6 +33,7 @@ class Tracker:
         self.intr = intr
         self.cams = cams
         self.recon = Reconstructor(cams, intr)
+        self.centres = {c: geo.camera_center(T) for c, T in cams.items()}
         self.masks = {c: mask.load(c, (rig.height, rig.width)) for c in rig.ids}
         self.pool = ThreadPoolExecutor(max(1, len(rig.ids)))
         self.tw, self.th = rig.width // 2, rig.height // 2
@@ -50,7 +51,8 @@ class Tracker:
         dets = {c: d for c, _, d in res}
         points = self.recon.reconstruct(dets)
         xyz = np.array([p[0] for p in points]).reshape(-1, 3)
-        return res, points, xyz, pose.disks(xyz)
+        seen_from = [[self.centres[c] for c in views] for _, views, _ in points]
+        return res, points, xyz, pose.disks(xyz, seen_from)
 
     def toggle_record(self):
         if self.file:
@@ -110,6 +112,9 @@ class Tracker:
                          (45, 45, 45), 1)
             for X in xyz:
                 cv2.circle(p, px(X), 3, (200, 200, 200), -1)
+            for d in ds:  # each marker linked to its disk centre
+                for X in d["markers"]:
+                    cv2.line(p, px(X), px(d["centre"]), (90, 90, 90), 1)
             for i in range(len(ds) - 1):
                 cv2.line(p, px(ds[i]["centre"]), px(ds[i + 1]["centre"]), (0, 200, 255), 2)
             for i, d in enumerate(ds):
