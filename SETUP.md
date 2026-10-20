@@ -61,9 +61,11 @@ lot of the image is bright, look for reflections (shiny surfaces, lights in view
 ## 4. Calibrate (after mounting and focusing; redo if a camera moves or is refocused)
 Needs `sudo apt install -y python3-scipy` for the final refinement.
 
-Board: ChArUco 7 x 5 squares, 35 mm squares, 25 mm markers, DICT_6X6_50 (in
-`rig.json` under `"board"`). Measure a printed square with a ruler and correct
-`square_mm`/`marker_mm` if the printer scaled it. Laser prints stay visible through
+Board: ChArUco 7 x 5 squares, 25 mm squares, 18 mm markers, DICT_6X6_50 (in
+`rig.json` under `"board"`; change it in the app under Settings, then Save board).
+Measure a printed square with a ruler and correct the sizes if the printer scaled it.
+Lens and position calibration may use different boards: switch the board setting
+before step 2. The position board's square size sets the world scale. Laser prints stay visible through
 the IR filter; inkjet often does not. Check in rigview first.
 
 1. Exposure for the board: `rigview`, press `b`, wait for OK, press `s`.

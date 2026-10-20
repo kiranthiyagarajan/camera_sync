@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 
+import cv2
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -118,8 +119,16 @@ class App(Gtk.Window):
         for d in DICTIONARIES:
             self.dictionary.append(d, d)
         self.dictionary.set_active_id(board["dictionary"])
-        self.squares = Gtk.Label(label=f"{board['squares_x']} x {board['squares_y']} squares", xalign=0)
-        for r, (name, w) in enumerate([("Board", self.squares), ("Square (mm)", self.square),
+        self.squares_x = Gtk.SpinButton.new_with_range(3, 30, 1)
+        self.squares_x.set_value(board["squares_x"])
+        self.squares_y = Gtk.SpinButton.new_with_range(3, 30, 1)
+        self.squares_y.set_value(board["squares_y"])
+        self.squares = Gtk.Box(spacing=4)
+        self.squares.pack_start(self.squares_x, False, False, 0)
+        self.squares.pack_start(Gtk.Label(label="x"), False, False, 0)
+        self.squares.pack_start(self.squares_y, False, False, 0)
+        self.squares.set_tooltip_text("Columns x rows of chessboard squares (count squares, not corners)")
+        for r, (name, w) in enumerate([("Squares", self.squares), ("Square (mm)", self.square),
                                        ("Marker (mm)", self.marker), ("Dictionary", self.dictionary)], 1):
             grid.attach(Gtk.Label(label=name, xalign=0), 0, r, 1, 1)
             grid.attach(w, 1, r, 1, 1)
@@ -269,11 +278,20 @@ class App(Gtk.Window):
 
     def on_save_board(self, _b):
         cfg = config.load()
-        cfg["board"].update(square_mm=round(self.square.get_value(), 2),
+        cfg["board"].update(squares_x=self.squares_x.get_value_as_int(),
+                            squares_y=self.squares_y.get_value_as_int(),
+                            square_mm=round(self.square.get_value(), 2),
                             marker_mm=round(self.marker.get_value(), 2),
                             dictionary=self.dictionary.get_active_id())
         if cfg["board"]["marker_mm"] >= cfg["board"]["square_mm"]:
             self.log("board not saved: the marker must be smaller than the square\n")
+            return
+        b = cfg["board"]
+        needed = b["squares_x"] * b["squares_y"] // 2
+        available = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, b["dictionary"])).bytesList.shape[0]
+        if needed > available:
+            self.log(f"board not saved: {b['squares_x']} x {b['squares_y']} needs {needed} markers but "
+                     f"{b['dictionary']} has only {available}\n")
             return
         config.save(cfg)
         self.log(f"board saved: {json.dumps(cfg['board'])}\n")
