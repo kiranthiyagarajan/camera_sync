@@ -5,8 +5,8 @@ Writes recordings/<date-time>/: <cam>.mjpeg (frames back to back), <cam>.csv (n,
 t_raw, offset, size per frame; t is CLOCK_MONOTONIC like the motor log), motors.csv
 (t_start, t_end of each move and the motor angles reached) and info.json (format,
 controls, camera ports). The robot is held still for --still seconds, then bends by
---amount motor degrees toward 0, 120 and 240 deg (home in between), then sweeps the bend
-direction round a circle in 30 deg steps, holding --hold s at each pose, repeating until
+each of --amounts (motor degrees) toward 0, 120 and 240 deg (home in between), optionally
+sweeps the bend direction round a circle, holding --hold s at each pose, repeating until
 --duration. All motors return home after recording.
 """
 import argparse
@@ -24,13 +24,15 @@ from .rig import Rig
 REC_DIR = os.path.join(PROJECT_DIR, "recordings")
 
 
-def poses(amount):
-    for d in (0, 120, 240):
-        yield bend_angles(d, amount)
+def poses(amounts, circle):
+    for amount in amounts:
+        for d in (0, 120, 240):
+            yield bend_angles(d, amount)
+            yield (0.0, 0.0, 0.0)
+    if circle:
+        for d in range(0, 361, 30):
+            yield bend_angles(d, amounts[-1])
         yield (0.0, 0.0, 0.0)
-    for d in range(0, 361, 30):
-        yield bend_angles(d, amount)
-    yield (0.0, 0.0, 0.0)
 
 
 def goto(m, angles, log):
@@ -43,7 +45,7 @@ def motor_script(m, t_start, args, log, stop):
     while time.monotonic() < t_start + args.still and not stop.is_set():
         time.sleep(0.01)
     while not stop.is_set():
-        for angles in poses(args.amount):
+        for angles in poses(args.amounts, args.circle):
             if time.monotonic() > t_start + args.duration or stop.is_set():
                 return
             goto(m, angles, log)
@@ -54,10 +56,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--still", type=float, default=10, help="seconds held still first")
     p.add_argument("--duration", type=float, default=30, help="total seconds")
-    p.add_argument("--amount", type=float, default=20, help="bend amount, motor degrees")
-    p.add_argument("--hold", type=float, default=1.0, help="seconds held at each pose")
-    p.add_argument("--exposure", type=float, help="exposure in ms for all cameras (default: rig.json)")
-    p.add_argument("--gain", type=int, help="gain for all cameras (default: rig.json)")
+    p.add_argument("--amounts", type=lambda s: [float(a) for a in s.split(",")], default=[20],
+                   help="bend amounts in motor degrees, e.g. 40,80,120 (each toward 0/120/240)")
+    p.add_argument("--circle", action="store_true", help="then sweep a circle at the last amount")
+    p.add_argument("--hold", type=float, default=3.0, help="seconds held at each pose (robot settles)")
+    p.add_argument("--exposure", type=float, default=3.0, help="exposure in ms for all cameras (default 3, tracking)")
+    p.add_argument("--gain", type=int, default=63, help="gain for all cameras (default 63)")
     p.add_argument("--no-motors", action="store_true")
     args = p.parse_args()
 

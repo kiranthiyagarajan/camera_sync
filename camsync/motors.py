@@ -35,7 +35,7 @@ FQBN = "esp32:esp32:esp32"  # ESP32 DevKit V1 = generic ESP32 Dev Module
 SKETCH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                       "firmware", "stepper_control")
 USB_IDS = {(0x10C4, 0xEA60), (0x1A86, 0x7523)}  # CP210x, CH340
-LIMIT_DEG = 90.0         # refuse motor angles beyond +-this from home
+LIMIT_DEG = 180.0        # refuse motor angles beyond +-this from home
 SECONDS_PER_DEG = 0.0178  # 1600 pulses/rev at 4 ms per pulse
 
 
