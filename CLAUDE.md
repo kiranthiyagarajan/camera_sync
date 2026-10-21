@@ -1,7 +1,8 @@
 # camera_sync — 4-camera motion capture for a soft robot
 
-Goal: real-time pose of a ~300 mm soft robot (4 segments incl. tip, 4–5 reflective
-markers per segment on rigid PLA disks) from 4 synchronized IR cameras; pose output
+Goal: real-time pose of a ~300 mm soft robot (4 identical PLA disks incl. the tip, ~70 mm
+apart vertically, each with 4 flat retroreflective stickers (~20 mm) on the rim, ideally
+90° apart; no top markers) from 4 synchronized IR cameras; pose output
 will later feed a robot control model (not chosen yet). Repo:
 https://github.com/kiranthiyagarajan/camera_sync (public, branch main).
 
