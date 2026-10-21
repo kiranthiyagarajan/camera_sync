@@ -1,0 +1,42 @@
+{
+  "board": {
+    "dictionary": "DICT_6X6_50",
+    "marker_mm": 18.0,
+    "square_mm": 25.0,
+    "squares_x": 7,
+    "squares_y": 5
+  },
+  "cameras": {
+    "cam1": "3-6.4",
+    "cam2": "3-1",
+    "cam3": "3-6.2",
+    "cam4": "3-4"
+  },
+  "controls": {
+    "3-6.4": {
+      "exposure_time_absolute": 83,
+      "gain": 24
+    },
+    "cam1": {
+      "exposure_time_absolute": 83,
+      "gain": 63
+    },
+    "cam2": {
+      "exposure_time_absolute": 83,
+      "gain": 63
+    },
+    "cam3": {
+      "exposure_time_absolute": 83,
+      "gain": 63
+    },
+    "cam4": {
+      "exposure_time_absolute": 83,
+      "gain": 63
+    }
+  },
+  "format": {
+    "fps": 120,
+    "height": 720,
+    "width": 1280
+  }
+}

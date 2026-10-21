@@ -127,6 +127,19 @@ python3 -m camsync.soak --minutes 10    # Ctrl+C stops early with a summary
 ```
 Frames lost per minute that grow over time = overheating.
 
+## 7. Stepper motors (ESP32 + 3 DRV8825)
+Firmware: `firmware/stepper_control/stepper_control.ino`. The ESP32 shows up as
+`/dev/ttyUSB0` (CP210x). Once per computer: `sudo usermod -aG dialout $USER`, then log
+out and back in (otherwise "Permission denied" on the port).
+```
+python3 -m camsync.motors --flash     # compile + upload (hold BOOT if it says "Connecting...")
+python3 -m camsync.motors             # interactive: type 1, +, -, 0, p, x, ?  (Ctrl+] quits)
+python3 -m camsync.motors 1 + + p     # send keys, print the replies
+```
+From Python: `m = Motors(); m.send("1+p")` returns the reply lines. Opening the port
+doesn't reset the ESP32; positions are software counts and reset with the board.
+Only one program can hold the port: close the Arduino IDE serial monitor first.
+
 ## Tests
 ```
 python3 -m unittest discover tests
