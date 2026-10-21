@@ -33,6 +33,7 @@ class App(Gtk.Window):
         self.set_default_size(1150, 760)
         self.proc = None
         self.tool_buttons = []
+        self.motor_busy = False
         self.connect("delete-event", self.on_close)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
@@ -109,6 +110,21 @@ class App(Gtk.Window):
             b.connect("clicked", lambda _b, k=keys: self.motor_command(k))
             row.pack_start(b, True, True, 0)
         left.pack_start(row, False, False, 0)
+        jog = Gtk.Grid(column_spacing=6, row_spacing=4)
+        jog.attach(Gtk.Label(label="Jog step", xalign=0), 0, 0, 1, 1)
+        self.jog_step = Gtk.ComboBoxText()
+        for d in ("1", "5", "18"):
+            self.jog_step.append(d, f"{d} deg")
+        self.jog_step.set_active_id("5")
+        jog.attach(self.jog_step, 1, 0, 2, 1)
+        for i in range(3):
+            jog.attach(Gtk.Label(label=f"Motor {i + 1}", xalign=0), 0, i + 1, 1, 1)
+            for col, sign in ((1, -1), (2, 1)):
+                b = Gtk.Button(label="−" if sign < 0 else "+")
+                b.set_tooltip_text("Turn this motor only, by the jog step (the others hold)")
+                b.connect("clicked", lambda _b, i=i, sg=sign: self.motor_jog(i, sg))
+                jog.attach(b, col, i + 1, 1, 1)
+        left.pack_start(jog, False, False, 0)
 
         self.heading(left, "Checks")
         self.tool_button(left, "Preflight check (about 35 s)",
@@ -238,8 +254,15 @@ class App(Gtk.Window):
         return True
 
     # ---- motors ------------------------------------------------------------------
+    def motor_jog(self, i, sign):
+        self.motor_command(("jog", i, sign * float(self.jog_step.get_active_id())))
+
     def motor_command(self, keys):
-        """Send keys (None = go home) to the ESP32 in a thread, then show its position."""
+        """Send keys (None = go home, ("jog", motor, degrees) = turn one motor) to the
+        ESP32 in a thread, then show its position. Clicks while busy are ignored."""
+        if self.motor_busy:
+            return
+        self.motor_busy = True
         self.motor_status.set_text("Motors: working...")
 
         def work():
@@ -249,6 +272,15 @@ class App(Gtk.Window):
                 try:
                     if keys is None:
                         m.goto(0, 0, 0)
+                    elif keys[0] == "jog":
+                        _, i, deg = keys
+                        pos, home = m.position()
+                        if not home:  # G needs a home: use this pose until Set home
+                            m.send("H")
+                            pos = (0.0, 0.0, 0.0)
+                        target = list(pos)
+                        target[i] += deg
+                        m.goto(*target, limit=360)
                     else:
                         m.send(keys)
                     (a1, a2, a3), home = m.position()
@@ -260,6 +292,7 @@ class App(Gtk.Window):
             except (Exception, SystemExit) as e:
                 text = f"Motors: {e}"
             GLib.idle_add(self.motor_status.set_text, text)
+            self.motor_busy = False
         threading.Thread(target=work, daemon=True).start()
 
     # ---- running tools -----------------------------------------------------------
