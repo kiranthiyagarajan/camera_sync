@@ -91,9 +91,9 @@ class App(Gtk.Window):
 
         self.heading(left, "Tracking")
         self.tool_button(left, "Track robot (proof of concept)",
-                         "Live markers, 3D pose view and bend angles at 3 ms exposure, gain 63. "
+                         "Live markers, rough pose and smoothed tip position at 3 ms exposure, gain 63. "
                          "Drag rotates the 3D view, o toggles the camera overlay, "
-                         "r records disk poses to logs/track-*.csv, q quits.",
+                         "r records tip and disk centres to logs/track-*.csv, b sets the base (robot at home), q quits.",
                          "track", lambda: ["--exposure", "3", "--gain", "63"])
 
         self.heading(left, "Robot motors")

@@ -1,9 +1,10 @@
 """Live proof-of-concept tracking: python3 -m camsync.track
 
 Detects markers in all cameras, triangulates them, groups them into disks and shows
-the pose in a 3D view (left-drag rotates, wheel or right-drag zooms, v resets) and
-over each camera image (o toggles), with the bend angle of each segment. Press r to
-record disk poses to logs/track-*.csv, q to quit. Needs calib/intrinsics, calib/extrinsics.json and
+a rough pose and a smoothed tip position (camsync.tip) in a 3D view (left-drag rotates,
+wheel or right-drag zooms, v resets) and over each camera image (o toggles). Press r to
+record the tip and disk centres to logs/track-*.csv, b to set the base point again with
+the robot upright at home, q to quit. Needs calib/intrinsics, calib/extrinsics.json and
 (recommended) calib/masks from the reflection-mask tool.
 """
 import argparse
@@ -16,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
-from . import calib, config, geometry as geo, mask, markers, pose, view3d
+from . import calib, config, geometry as geo, mask, markers, pose, tip, view3d
 from .config import LOG_DIR
 from .imaging import decode, downscale2
 from .plots import COLORS, text
@@ -43,6 +44,8 @@ class Tracker:
         self.centre = None  # 3D view centre, follows the robot
         self.orbit = view3d.Orbit(2 * self.tw - INFO_W, VIEW_H)
         self.overlay = True
+        self.est = tip.TipEstimator(tip.load_base())
+        self.set_base = False
 
     def process(self, s):
         def one(c):
@@ -57,8 +60,12 @@ class Tracker:
             keep = pose.on_backbone([p[0] for p in points])
             points = [p for p, k in zip(points, keep) if k]
         xyz = np.array([p[0] for p in points]).reshape(-1, 3)
-        seen_from = [[self.centres[c] for c in views] for _, views, _ in points]
-        return res, points, xyz, pose.disks(xyz, seen_from)
+        self.est.update(xyz)
+        if self.set_base and self.est.base is not None:
+            tip.save_base(self.est.base)
+            print(f"base point saved: {np.round(self.est.base, 1)}")
+            self.set_base = False
+        return res, points, xyz, self.est.pose()
 
     def toggle_record(self):
         if self.file:
@@ -70,14 +77,17 @@ class Tracker:
         self.path = os.path.join(LOG_DIR, time.strftime("track-%Y%m%d-%H%M%S.csv"))
         self.file = open(self.path, "w", newline="")
         self.writer = csv.writer(self.file)
-        self.writer.writerow(["frame_time", "disk", "x_mm", "y_mm", "z_mm", "dir_x", "dir_y",
-                              "dir_z", "markers"])
+        self.writer.writerow(["frame_time", "tip_x", "tip_y", "tip_z", "disks_found"]
+                             + [f"disk{i + 1}_{a}" for i in range(tip.N_DISKS - 1) for a in "xyz"])
         print(f"recording to {self.path}")
 
     def record(self, t, ds):
-        for i, d in enumerate(ds):
-            v = d["direction"] if d["direction"] is not None else [np.nan] * 3
-            self.writer.writerow([f"{t:.6f}", i, *np.round(d["centre"], 2), *np.round(v, 4), d["n"]])
+        e = self.est
+        if e.tip is None:
+            return
+        disks = [x for c in e.disks[:-1] for x in (np.round(c, 2) if c is not None else [""] * 3)]
+        self.writer.writerow([f"{t:.6f}", *np.round(e.tip, 2), "".join(str(k + 1) for k in e.found)]
+                             + disks)
 
     # ---- drawing ---------------------------------------------------------------
     def tile(self, i, c, gray, dets, points, ds):
@@ -113,12 +123,14 @@ class Tracker:
         text(p, "drag rotate, wheel/right-drag zoom, v reset (grid 50 mm)", (8, 20), 0.5,
              (200, 200, 200))
         info = np.full((VIEW_H, INFO_W, 3), 15, np.uint8)
-        lines = [f"{len(xyz)} markers, {len(ds)} disks   {self.rate:.0f} Hz",
-                 "REC " + os.path.basename(self.path) if self.file else "r record  o overlay  q quit"]
+        found = "".join(str(k + 1) for k in self.est.found) or "-"
+        lines = [f"{len(xyz)} markers, disks seen {found}   {self.rate:.0f} Hz",
+                 "REC " + os.path.basename(self.path) if self.file else
+                 "r record  o overlay  b base (robot at home)  q quit"]
         for i, d in enumerate(ds):
             c = d["centre"]
-            tag = "tip  " if i == len(ds) - 1 else f"disk{i}"
-            lines.append(f"{tag} ({c[0]:6.0f},{c[1]:6.0f},{c[2]:6.0f}) n={d['n']}")
+            tag = "tip  " if i == len(ds) - 1 else f"disk{i + 1}"
+            lines.append(f"{tag} ({c[0]:6.0f},{c[1]:6.0f},{c[2]:6.0f})")
         lines.append("")
         segs, total = pose.bend_angles(ds)
         for i, a in enumerate(segs):
@@ -173,6 +185,9 @@ class Tracker:
                     self.overlay = not self.overlay
                 if k == ord("v"):
                     self.orbit.reset()
+                if k == ord("b"):  # robot upright at home: set the base point again
+                    self.est = tip.TipEstimator()
+                    self.set_base = True
                 if cv2.getWindowProperty(WINDOW, cv2.WND_PROP_AUTOSIZE) < 0:
                     break
         finally:
