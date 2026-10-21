@@ -95,6 +95,21 @@ class App(Gtk.Window):
                          "r records disk poses to logs/track-*.csv, q quits.",
                          "track", lambda: ["--exposure", "5.5", "--gain", "63"])
 
+        self.heading(left, "Robot motors")
+        self.motor_status = Gtk.Label(label="Motors: not checked", xalign=0)
+        left.pack_start(self.motor_status, False, False, 0)
+        row = Gtk.Box(spacing=6)
+        for label, tip, keys in (
+                ("Release", "Disable all motors so the robot can be moved by hand", "x"),
+                ("Set home", "Make the current pose home (0, 0, 0) and hold it", "He"),
+                ("Hold", "Enable all motors at their current position", "e"),
+                ("Go home", "Move all motors back to home together", None)):
+            b = Gtk.Button(label=label)
+            b.set_tooltip_text(tip)
+            b.connect("clicked", lambda _b, k=keys: self.motor_command(k))
+            row.pack_start(b, True, True, 0)
+        left.pack_start(row, False, False, 0)
+
         self.heading(left, "Checks")
         self.tool_button(left, "Preflight check (about 35 s)",
                          "Cameras present, settings accepted, 30 s streaming test", "preflight")
@@ -221,6 +236,31 @@ class App(Gtk.Window):
         if not cams:
             self.calib_summary.set_text("No cameras connected.")
         return True
+
+    # ---- motors ------------------------------------------------------------------
+    def motor_command(self, keys):
+        """Send keys (None = go home) to the ESP32 in a thread, then show its position."""
+        self.motor_status.set_text("Motors: working...")
+
+        def work():
+            from .motors import Motors
+            try:
+                m = Motors()
+                try:
+                    if keys is None:
+                        m.goto(0, 0, 0)
+                    else:
+                        m.send(keys)
+                    (a1, a2, a3), home = m.position()
+                    held = "holding" if "Motors enabled (holding)." in m.send("p") else "released"
+                finally:
+                    m.close()
+                text = (f"Motors: {a1:.1f}, {a2:.1f}, {a3:.1f} deg from home, {held}"
+                        if home else "Motors: home not set")
+            except (Exception, SystemExit) as e:
+                text = f"Motors: {e}"
+            GLib.idle_add(self.motor_status.set_text, text)
+        threading.Thread(target=work, daemon=True).start()
 
     # ---- running tools -----------------------------------------------------------
     def soak_args(self):
