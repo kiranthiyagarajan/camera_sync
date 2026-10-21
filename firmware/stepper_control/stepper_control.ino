@@ -1,8 +1,22 @@
 #include <Arduino.h>
+#include <Preferences.h>
 #include <math.h>
 
 // =====================================================
-// ESP32 DevKit V1 + 3 DRV8825 stepper motor drivers
+// ESP32 DevKit V1 + 3 DRV8825 stepper motor drivers  (v2)
+//
+// All motors stay enabled (holding) so tendon tension can't back-drive them.
+// Positions are counted relative to home and saved to flash after every move,
+// so they survive a reset or power cycle.
+//
+// Line commands (end with newline):
+//   G a1 a2 a3   move all motors together to these angles (degrees from home)
+//   H            set the current position of all motors as home
+//   P            print "POS a1 a2 a3 home=0|1 enabled=0|1"
+// Single keys (as in v1):
+//   1/2/3 select a motor, + / - move it 18 degrees, 0 set or return to home,
+//   p print positions, x disable all motors (e enables them again), ? help
+// A move started with G or + / - stops early if 'x' arrives while it runs.
 // =====================================================
 
 // GPIO assignments: do not change
@@ -17,269 +31,233 @@ const long PULSES_PER_REV = 1600;
 // Each + or - command moves the selected motor by 18 degrees
 const float MOVE_DEGREES = 18.0f;
 
-// Conservative STEP pulse timing
+// STEP pulse timing (same rate as v1: one pulse per 4 ms on the fastest motor)
 const int STEP_HIGH_US = 5;
-const int STEP_LOW_US  = 4000;
+const unsigned long STEP_PERIOD_US = 4005;
 
-// Selected motor: -1 means none selected
 int selectedMotor = -1;
+long pulsePosition[3] = {0, 0, 0};  // relative to home
+bool homeSet = false;
+bool enabled = false;
 
-// Software-estimated motor positions
-float commandedDegrees[3] = {0.0f, 0.0f, 0.0f};
-long pulsePosition[3] = {0, 0, 0};
+Preferences prefs;
 
-// Home position tracking
-long homePulsePosition[3] = {0, 0, 0};
-bool homeSet[3] = {false, false, false};
+float toDegrees(long pulses) { return (float)pulses * 360.0f / PULSES_PER_REV; }
+long toPulses(float degrees) { return lroundf(degrees * (float)PULSES_PER_REV / 360.0f); }
 
-// =====================================================
-// Disable all motors
-// DRV8825 ENABLE is active LOW
-// HIGH = disabled, LOW = enabled
-// =====================================================
-void disableAllMotors() {
-  for (int i = 0; i < 3; i++) {
-    digitalWrite(EN_PINS[i], HIGH);
-  }
+void savePositions() {
+  prefs.putBytes("pos", pulsePosition, sizeof(pulsePosition));
+  prefs.putBool("home", homeSet);
 }
 
-// =====================================================
-// Select one motor
-// =====================================================
-void selectMotor(int index) {
-  if (index < 0 || index > 2) {
-    Serial.println("Invalid motor selection.");
+// DRV8825 ENABLE is active LOW
+void setEnabled(bool on) {
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(EN_PINS[i], on ? LOW : HIGH);
+  }
+  enabled = on;
+}
+
+// Move all motors to target pulse positions together (straight line in motor space).
+// Returns false if stopped early by 'x'.
+bool moveTo(const long target[3]) {
+  long delta[3], count[3], done[3] = {0, 0, 0};
+  long longest = 0;
+  for (int i = 0; i < 3; i++) {
+    delta[i] = target[i] - pulsePosition[i];
+    count[i] = labs(delta[i]);
+    digitalWrite(DIR_PINS[i], delta[i] > 0 ? HIGH : LOW);
+    if (count[i] > longest) longest = count[i];
+  }
+  if (longest == 0) return true;
+  if (!enabled) setEnabled(true);
+  delayMicroseconds(10);
+
+  unsigned long next = micros();
+  for (long k = 1; k <= longest; k++) {
+    while ((long)(micros() - next) < 0) {}
+    next += STEP_PERIOD_US;
+    for (int i = 0; i < 3; i++) {
+      // Spread each motor's pulses evenly over the move
+      long due = (count[i] * k) / longest;
+      if (due > done[i]) {
+        digitalWrite(STEP_PINS[i], HIGH);
+      }
+    }
+    delayMicroseconds(STEP_HIGH_US);
+    for (int i = 0; i < 3; i++) {
+      long due = (count[i] * k) / longest;
+      if (due > done[i]) {
+        digitalWrite(STEP_PINS[i], LOW);
+        done[i] = due;
+        pulsePosition[i] += delta[i] > 0 ? 1 : -1;
+      }
+    }
+    if (Serial.available() > 0 && (Serial.peek() == 'x' || Serial.peek() == 'X')) {
+      savePositions();
+      Serial.println("STOPPED");
+      return false;
+    }
+  }
+  savePositions();
+  return true;
+}
+
+void printPos() {
+  Serial.print("POS");
+  for (int i = 0; i < 3; i++) {
+    Serial.print(" ");
+    Serial.print(toDegrees(pulsePosition[i]), 3);
+  }
+  Serial.print(" home=");
+  Serial.print(homeSet ? 1 : 0);
+  Serial.print(" enabled=");
+  Serial.println(enabled ? 1 : 0);
+}
+
+void setHome() {
+  for (int i = 0; i < 3; i++) pulsePosition[i] = 0;
+  homeSet = true;
+  savePositions();
+}
+
+// G a1 a2 a3: absolute angles from home
+void handleGoto(String args) {
+  float a[3];
+  if (sscanf(args.c_str(), "%f %f %f", &a[0], &a[1], &a[2]) != 3) {
+    Serial.println("ERR usage: G a1 a2 a3");
     return;
   }
-  disableAllMotors();
-  selectedMotor = index;
-  digitalWrite(EN_PINS[selectedMotor], LOW);
-  Serial.print("Selected motor ");
-  Serial.println(selectedMotor + 1);
-  Serial.println("Motor enabled.");
-  Serial.println("Press + or - to move 18 degrees.");
-  Serial.println("Press 0 to set or return to home.");
+  if (!homeSet) {
+    Serial.println("ERR home not set (send H)");
+    return;
+  }
+  long target[3];
+  for (int i = 0; i < 3; i++) target[i] = toPulses(a[i]);
+  bool ok = moveTo(target);
+  Serial.print(ok ? "OK " : "STOPPED ");
+  printPos();
 }
 
-// =====================================================
-// Move the selected motor by a requested angle
-// =====================================================
-void moveSelectedMotor(float angleChange) {
-  // Safety check: a motor must be selected first
-  if (selectedMotor < 0 || selectedMotor > 2) {
+void moveSelected(float angleChange) {
+  if (selectedMotor < 0) {
     Serial.println("ERROR: Select motor 1, 2, or 3 first.");
     return;
   }
-  int m = selectedMotor;
-
-  // Calculate the new target angle
-  float newAngle = commandedDegrees[m] + angleChange;
-
-  // Convert target angle to absolute STEP pulse position
-  long targetPulses = lroundf(
-    newAngle * (float)PULSES_PER_REV / 360.0f
-  );
-  long difference = targetPulses - pulsePosition[m];
-  if (difference == 0) {
-    Serial.println("No STEP pulses required.");
-    return;
-  }
-
-  // Set direction
-  digitalWrite(DIR_PINS[m], difference > 0 ? HIGH : LOW);
-  delayMicroseconds(10);
-  long count = labs(difference);
-
+  long target[3] = {pulsePosition[0], pulsePosition[1], pulsePosition[2]};
+  target[selectedMotor] += toPulses(angleChange);
   Serial.print("Motor ");
-  Serial.print(m + 1);
+  Serial.print(selectedMotor + 1);
   Serial.print(" | Target angle: ");
-  Serial.print(newAngle, 1);
-  Serial.print(" degrees | Pulses: ");
-  Serial.println(count);
-
-  // Generate STEP pulses
-  for (long i = 0; i < count; i++) {
-    digitalWrite(STEP_PINS[m], HIGH);
-    delayMicroseconds(STEP_HIGH_US);
-    digitalWrite(STEP_PINS[m], LOW);
-    delayMicroseconds(STEP_LOW_US);
-  }
-
-  // Update software position estimate
-  pulsePosition[m] = targetPulses;
-  commandedDegrees[m] =
-    (float)pulsePosition[m] * 360.0f / PULSES_PER_REV;
-  Serial.println("Move command completed.");
+  Serial.print(toDegrees(target[selectedMotor]), 1);
+  Serial.println(" degrees");
+  if (moveTo(target)) Serial.println("Move command completed.");
 }
 
-// =====================================================
-// Set home once, then return to that home position
-// =====================================================
+// First press of 0 sets home (for all motors), later presses return the selected motor home
 void handleHome() {
-  if (selectedMotor < 0 || selectedMotor > 2) {
+  if (!homeSet) {
+    setHome();
+    Serial.println("Home position recorded for all motors.");
+    return;
+  }
+  if (selectedMotor < 0) {
     Serial.println("ERROR: Select a motor first.");
     return;
   }
-  int m = selectedMotor;
-
-  // First press of 0: record the current position as home
-  if (!homeSet[m]) {
-    homePulsePosition[m] = pulsePosition[m];
-    homeSet[m] = true;
-    Serial.print("Home position recorded for motor ");
-    Serial.println(m + 1);
-    Serial.println(
-      "This is a software reference, not a physical sensor."
-    );
-    return;
-  }
-
-  // Later presses of 0: return to recorded home
-  long difference = homePulsePosition[m] - pulsePosition[m];
-  if (difference == 0) {
-    Serial.println("Motor is already at its recorded home position.");
-    return;
-  }
-
-  digitalWrite(DIR_PINS[m], difference > 0 ? HIGH : LOW);
-  delayMicroseconds(10);
-  long count = labs(difference);
-
-  Serial.print("Returning motor ");
-  Serial.print(m + 1);
-  Serial.print(" to home. STEP pulses: ");
-  Serial.println(count);
-
-  for (long i = 0; i < count; i++) {
-    digitalWrite(STEP_PINS[m], HIGH);
-    delayMicroseconds(STEP_HIGH_US);
-    digitalWrite(STEP_PINS[m], LOW);
-    delayMicroseconds(STEP_LOW_US);
-  }
-
-  pulsePosition[m] = homePulsePosition[m];
-  commandedDegrees[m] =
-    (float)pulsePosition[m] * 360.0f / PULSES_PER_REV;
-  Serial.println("Home return command completed.");
+  long target[3] = {pulsePosition[0], pulsePosition[1], pulsePosition[2]};
+  target[selectedMotor] = 0;
+  if (moveTo(target)) Serial.println("Home return command completed.");
 }
 
-// =====================================================
-// Print estimated motor positions
-// =====================================================
 void printPositions() {
   Serial.println();
   Serial.println("=== SOFTWARE POSITION ESTIMATES ===");
   for (int i = 0; i < 3; i++) {
     Serial.print("Motor ");
     Serial.print(i + 1);
-    Serial.print(" | Estimated angle: ");
-    Serial.print(commandedDegrees[i], 2);
-    Serial.print(" degrees");
-    if (homeSet[i]) {
-      float relativeAngle =
-        (float)(pulsePosition[i] - homePulsePosition[i])
-        * 360.0f / PULSES_PER_REV;
-      Serial.print(" | Relative to home: ");
-      Serial.print(relativeAngle, 2);
-      Serial.print(" degrees");
-    } else {
-      Serial.print(" | Home not set");
-    }
-    Serial.println();
+    Serial.print(" | Relative to home: ");
+    Serial.print(toDegrees(pulsePosition[i]), 2);
+    Serial.println(" degrees");
   }
+  Serial.println(homeSet ? "Home set." : "Home not set.");
+  Serial.println(enabled ? "Motors enabled (holding)." : "Motors disabled.");
   Serial.println("===================================");
 }
 
-// =====================================================
-// Help menu
-// =====================================================
 void printHelp() {
   Serial.println();
-  Serial.println("===== MOTOR KEYBOARD CONTROL =====");
-  Serial.println("1 = Select motor 1");
-  Serial.println("2 = Select motor 2");
-  Serial.println("3 = Select motor 3");
-  Serial.println("+ = Move selected motor +18 degrees");
-  Serial.println("- = Move selected motor -18 degrees");
-  Serial.println("0 = Set home / return to home");
+  Serial.println("===== MOTOR CONTROL (v2) =====");
+  Serial.println("G a1 a2 a3 = Move all motors to angles from home (degrees)");
+  Serial.println("H = Set current position as home");
+  Serial.println("P = Print positions (one line)");
+  Serial.println("1/2/3 = Select motor, + / - = move it 18 degrees");
+  Serial.println("0 = Set home / return selected motor to home");
   Serial.println("p = Print estimated positions");
-  Serial.println("x = Disable all motors");
+  Serial.println("x = Disable all motors, e = enable all motors");
   Serial.println("? = Display this menu");
-  Serial.println("==================================");
+  Serial.println("==============================");
 }
 
-// =====================================================
-// Setup
-// =====================================================
 void setup() {
-  Serial.begin(115200);
-  delay(1500);
-
   for (int i = 0; i < 3; i++) {
     pinMode(STEP_PINS[i], OUTPUT);
     pinMode(DIR_PINS[i], OUTPUT);
     pinMode(EN_PINS[i], OUTPUT);
     digitalWrite(STEP_PINS[i], LOW);
     digitalWrite(DIR_PINS[i], LOW);
-    // Keep all motors disabled at startup
-    digitalWrite(EN_PINS[i], HIGH);
   }
+  // Hold the motors straight away so the robot doesn't relax during boot
+  setEnabled(true);
 
+  prefs.begin("stepper", false);
+  if (prefs.getBytesLength("pos") == sizeof(pulsePosition)) {
+    prefs.getBytes("pos", pulsePosition, sizeof(pulsePosition));
+  }
+  homeSet = prefs.getBool("home", false);
+
+  Serial.begin(115200);
+  Serial.setTimeout(200);
   Serial.println();
-  Serial.println("ESP32 three-motor controller started.");
-  Serial.println("All motors are initially disabled.");
-  Serial.println("Movement increment: 18 degrees.");
-  Serial.println("Baud rate: 115200");
+  Serial.println("ESP32 three-motor controller v2 started.");
   printHelp();
+  printPos();
 }
 
-// =====================================================
-// Main loop
-// =====================================================
 void loop() {
   while (Serial.available() > 0) {
     char key = Serial.read();
-
-    // Ignore line endings and spaces
     if (key == '\r' || key == '\n' || key == ' ') {
+      continue;
+    }
+    if (key == 'G') {
+      handleGoto(Serial.readStringUntil('\n'));
       continue;
     }
 
     Serial.print("Received key: ");
     Serial.println(key);
 
-    if (key == '1') {
-      selectMotor(0);
+    if (key == '1' || key == '2' || key == '3') {
+      selectedMotor = key - '1';
+      Serial.print("Selected motor ");
+      Serial.println(selectedMotor + 1);
     }
-    else if (key == '2') {
-      selectMotor(1);
-    }
-    else if (key == '3') {
-      selectMotor(2);
-    }
-    else if (key == '+' || key == '=') {
-      moveSelectedMotor(MOVE_DEGREES);
-    }
-    else if (key == '-') {
-      moveSelectedMotor(-MOVE_DEGREES);
-    }
-    else if (key == '0') {
-      handleHome();
-    }
-    else if (key == 'p' || key == 'P') {
-      printPositions();
-    }
+    else if (key == '+' || key == '=') moveSelected(MOVE_DEGREES);
+    else if (key == '-') moveSelected(-MOVE_DEGREES);
+    else if (key == '0') handleHome();
+    else if (key == 'H') { setHome(); Serial.println("Home set to current position."); }
+    else if (key == 'P') printPos();
+    else if (key == 'p') printPositions();
     else if (key == 'x' || key == 'X') {
-      disableAllMotors();
-      selectedMotor = -1;
+      setEnabled(false);
       Serial.println("All motors disabled.");
-      Serial.println("Select a motor before moving again.");
     }
-    else if (key == '?') {
-      printHelp();
+    else if (key == 'e') {
+      setEnabled(true);
+      Serial.println("All motors enabled.");
     }
-    else {
-      Serial.println("Unknown command. Press ? for help.");
-    }
+    else if (key == '?') printHelp();
+    else Serial.println("Unknown command. Press ? for help.");
   }
 }
