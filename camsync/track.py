@@ -53,6 +53,9 @@ class Tracker:
         res = list(self.pool.map(one, self.rig.ids))
         dets = {c: d for c, _, d in res}
         points = self.recon.reconstruct(dets)
+        if points:
+            keep = pose.on_backbone([p[0] for p in points])
+            points = [p for p, k in zip(points, keep) if k]
         xyz = np.array([p[0] for p in points]).reshape(-1, 3)
         seen_from = [[self.centres[c] for c in views] for _, views, _ in points]
         return res, points, xyz, pose.disks(xyz, seen_from)

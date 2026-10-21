@@ -12,6 +12,7 @@ import numpy as np
 RIM_RADIUS_MM = 30.0  # disk centre to marker centre
 LINK_MM = 30.0        # centre estimates closer than this (chained) belong to one disk
 N_DISKS = 4
+BACKBONE_MM = 45.0    # markers lie within one rim radius (+ margin) of the backbone
 
 
 def cluster(points, link=LINK_MM):
@@ -31,6 +32,28 @@ def cluster(points, link=LINK_MM):
             stack.extend(near.tolist())
         k += 1
     return [np.nonzero(label == j)[0] for j in range(k)]
+
+
+def on_backbone(points, max_mm=BACKBONE_MM, iterations=3):
+    """Boolean mask of the points within max_mm of a smooth curve through them (a quadratic
+    along their main axis), refitted on the inliers. Removes ghost matches off the robot."""
+    points = np.asarray(points, float).reshape(-1, 3)
+    keep = np.ones(len(points), bool)
+    if len(points) < 5:
+        return keep
+    for i in range(iterations):
+        p = points[keep]
+        axis = np.linalg.svd(p - p.mean(axis=0))[2][0]
+        t = (points - p.mean(axis=0)) @ axis
+        A = np.c_[t ** 2, t, np.ones(len(t))]
+        coef = np.linalg.lstsq(A[keep], p, rcond=None)[0]
+        resid = np.linalg.norm(points - A @ coef, axis=1)
+        # first pass loose, so a ghost that pulled the first fit doesn't reject real markers
+        new = resid < (max(max_mm, 3 * np.median(resid)) if i == 0 else max_mm)
+        if new.sum() < 5 or (new == keep).all():
+            break
+        keep = new
+    return keep
 
 
 def centre_estimates(points, seen_from, radius=RIM_RADIUS_MM):

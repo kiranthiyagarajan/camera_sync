@@ -8,10 +8,10 @@ Centroids are intensity weighted (sub-pixel). Pixels in the static reflection ma
 import cv2
 import numpy as np
 
-CONTRAST = 35       # blob pixels are this much brighter than the local mean
-FLOOR = 60          # and at least this bright
+CONTRAST = 20       # blob pixels are this much brighter than the local mean (markers seen
+FLOOR = 40          # at ~45 deg are dim) and at least this bright
 LOCAL_PX = 41       # size of the local-mean window (about 2 marker diameters)
-MIN_AREA = 150      # px; markers are ~200-800 px at 0.4-0.6 m; smaller = edges, noise
+MIN_AREA = 60       # px; markers are ~200-800 px head-on, less when seen at an angle
 MAX_AREA = 3000     # px; larger is a reflection, not a marker
 MIN_FILL = 0.5      # blob area / bounding-box area: rejects streaks and edges
 MAX_ASPECT = 2.0

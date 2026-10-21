@@ -11,8 +11,8 @@ import numpy as np
 
 from . import geometry as geo
 
-EPIPOLAR_PX = 8.0   # max distance from the epipolar line, in pixels
-REPROJ_PX = 8.0     # max reprojection error for a camera to count as seeing a point
+EPIPOLAR_PX = 3.0   # max distance from the epipolar line, in pixels (true matches < 2 px;
+REPROJ_PX = 3.0     # neighbouring markers of one disk are ~10-20 px off) and max reprojection error
 
 
 def skew(v):
